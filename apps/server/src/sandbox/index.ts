@@ -315,6 +315,9 @@ type PrePopulate = {
  */
 export { prePopulateWorkspace as __prePopulateWorkspaceForTest };
 
+/** Timeout for every networked git clone/fetch in workspace provisioning. */
+export const GIT_NETWORK_TIMEOUT_MS = 300_000;
+
 export function prePopulateWorkspace(
   workDir: string,
   pre: PrePopulate,
@@ -407,23 +410,27 @@ export function prePopulateWorkspace(
   }
   const start = Date.now();
   const depth = pre.shallow ? "1" : "50";
-  const shallowArgs = pre.shallow ? ["--single-branch"] : [];
+  // Code-writing clones are blobless partial clones: commits and trees for the
+  // full depth come down, file contents only for what is checked out (the rest
+  // lazily, via the sandbox's auth env). Repos with large binary history
+  // otherwise blew the clone timeout (vocalsplit-kit#216).
+  const modeArgs = pre.shallow ? ["--single-branch"] : ["--filter=blob:none"];
   // Recreate-from-base workflows (build) always cut their branch from the
   // default branch — never `clone --branch <feature>`, which would resurrect a
   // stale *pushed* feature branch from an earlier incomplete run (#153).
   if (pre.recreateFromBase) {
-    cloneDefaultAndCreateBranch(repoDir, url, authArgs, depth, shallowArgs, pre, markerPath, start, scrub);
+    cloneDefaultAndCreateBranch(repoDir, url, authArgs, depth, modeArgs, pre, markerPath, start, scrub);
     return;
   }
   if (pre.headFetchRef) {
-    cloneFromFetchRef(repoDir, url, authArgs, depth, shallowArgs, pre, markerPath, start, scrub);
+    cloneFromFetchRef(repoDir, url, authArgs, depth, modeArgs, pre, markerPath, start, scrub);
     return;
   }
   try {
     execFileSync(
       "git",
-      [...authArgs, "clone", "--branch", pre.branch, "--depth", depth, ...shallowArgs, url, repoDir],
-      { stdio: "pipe", timeout: 120_000 },
+      [...authArgs, "clone", "--branch", pre.branch, "--depth", depth, ...modeArgs, url, repoDir],
+      { stdio: "pipe", timeout: GIT_NETWORK_TIMEOUT_MS },
     );
     normalizeOrigin(repoDir, pre);
     ensureBaseAvailable(repoDir, pre, authArgs, url, scrub);
@@ -443,7 +450,7 @@ export function prePopulateWorkspace(
       // and push it later. The remote doesn't have it yet at pre-clone time —
       // clone the default branch, then create the target branch locally so
       // the agent enters a workspace already on the right branch.
-      cloneDefaultAndCreateBranch(repoDir, url, authArgs, depth, shallowArgs, pre, markerPath, start, scrub);
+      cloneDefaultAndCreateBranch(repoDir, url, authArgs, depth, modeArgs, pre, markerPath, start, scrub);
       return;
     }
     // Don't kill the run on a failed pre-clone — fall through to an empty
@@ -492,7 +499,7 @@ function cloneFromFetchRef(
   url: string,
   authArgs: string[],
   depth: string,
-  shallowArgs: string[],
+  modeArgs: string[],
   pre: PrePopulate,
   markerPath: string,
   start: number,
@@ -501,13 +508,13 @@ function cloneFromFetchRef(
   try {
     execFileSync(
       "git",
-      [...authArgs, "clone", "--depth", depth, ...shallowArgs, url, repoDir],
-      { stdio: "pipe", timeout: 120_000 },
+      [...authArgs, "clone", "--depth", depth, ...modeArgs, url, repoDir],
+      { stdio: "pipe", timeout: GIT_NETWORK_TIMEOUT_MS },
     );
     execFileSync(
       "git",
       ["-C", repoDir, ...authArgs, "fetch", "--depth", depth, url, pre.headFetchRef!],
-      { stdio: "pipe", timeout: 120_000 },
+      { stdio: "pipe", timeout: GIT_NETWORK_TIMEOUT_MS },
     );
     execFileSync(
       "git",
@@ -556,7 +563,7 @@ function cloneDefaultAndCreateBranch(
   url: string,
   authArgs: string[],
   depth: string,
-  shallowArgs: string[],
+  modeArgs: string[],
   pre: PrePopulate,
   markerPath: string,
   start: number,
@@ -565,8 +572,8 @@ function cloneDefaultAndCreateBranch(
   try {
     execFileSync(
       "git",
-      [...authArgs, "clone", "--depth", depth, ...shallowArgs, url, repoDir],
-      { stdio: "pipe", timeout: 120_000 },
+      [...authArgs, "clone", "--depth", depth, ...modeArgs, url, repoDir],
+      { stdio: "pipe", timeout: GIT_NETWORK_TIMEOUT_MS },
     );
     execFileSync(
       "git",
@@ -626,7 +633,7 @@ function ensureBaseAvailable(
   const base = pre.baseBranch;
   if (!base || base === pre.branch || pre.recreateFromBase) return;
   const dest = `+refs/heads/${base}:refs/remotes/origin/${base}`;
-  const run = (args: string[], timeout = 120_000): void => {
+  const run = (args: string[], timeout = GIT_NETWORK_TIMEOUT_MS): void => {
     execFileSync("git", ["-C", repoDir, ...args], { stdio: "pipe", timeout });
   };
   const hasMergeBase = (): boolean => {
@@ -767,7 +774,7 @@ function refreshExistingClone(
     execFileSync(
       "git",
       ["-C", repoDir, ...authArgs, "fetch", ...depth, url, pre.headFetchRef ?? pre.branch],
-      { stdio: "pipe", timeout: 120_000 },
+      { stdio: "pipe", timeout: GIT_NETWORK_TIMEOUT_MS },
     );
     execFileSync(
       "git",

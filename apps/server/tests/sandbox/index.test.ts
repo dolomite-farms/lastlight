@@ -37,7 +37,11 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { __prePopulateWorkspaceForTest as prePopulateWorkspace, WorkspaceBusyError } from "#src/sandbox/index.js";
+import {
+  __prePopulateWorkspaceForTest as prePopulateWorkspace,
+  GIT_NETWORK_TIMEOUT_MS,
+  WorkspaceBusyError,
+} from "#src/sandbox/index.js";
 import { markRunLive, __resetLiveRunsForTest } from "#src/workflows/live-runs.js";
 
 const mockExec = vi.mocked(execFileSync);
@@ -218,6 +222,49 @@ describe("prePopulateWorkspace clone depth + per-PR reuse (issue #107)", () => {
     const clone = findClone();
     expect(clone[clone.indexOf("--depth") + 1]).toBe("50");
     expect(clone).not.toContain("--single-branch");
+  });
+
+  it("clones code-writing workflows blobless (--filter=blob:none); read-only shallow clones stay unfiltered", () => {
+    prePopulateWorkspace(workDir, {
+      owner: "cliftonc", repo: REPO, branch: "main", token: TOKEN,
+      runId: "run-1", shallow: false,
+    });
+    expect(findClone()).toContain("--filter=blob:none");
+
+    mockExec.mockClear();
+    rmSync(join(workDir, REPO), { recursive: true, force: true });
+    prePopulateWorkspace(workDir, {
+      owner: "cliftonc", repo: REPO, branch: "main", token: TOKEN,
+      runId: "run-2", shallow: true,
+    });
+    expect(findClone().some((a) => a.startsWith("--filter"))).toBe(false);
+  });
+
+  it("gives every networked clone/fetch the shared 300s timeout (PR base fetch included)", () => {
+    expect(GIT_NETWORK_TIMEOUT_MS).toBe(300_000);
+    // merge-base succeeds on the first deepen round.
+    prePopulateWorkspace(workDir, {
+      owner: "cliftonc", repo: REPO, branch: "feature", token: TOKEN,
+      runId: "run-1", shallow: false, baseBranch: "main",
+    });
+    const network = mockExec.mock.calls.filter((c) => {
+      const verb = gitVerb((c[1] as string[]) ?? []);
+      return verb === "clone" || verb === "fetch";
+    });
+    expect(network.map((c) => gitVerb(c[1] as string[]))).toEqual(["clone", "fetch", "fetch"]);
+    for (const c of network) {
+      expect((c[2] as { timeout?: number }).timeout).toBe(GIT_NETWORK_TIMEOUT_MS);
+    }
+  });
+
+  it("refreshes a reused workspace with the shared 300s fetch timeout", () => {
+    seedExistingClone("old-run");
+    prePopulateWorkspace(workDir, {
+      owner: "cliftonc", repo: REPO, branch: "feature", token: TOKEN,
+      runId: "new-run", shallow: false,
+    });
+    const fetch = mockExec.mock.calls.find((c) => gitVerb((c[1] as string[]) ?? []) === "fetch")!;
+    expect((fetch[2] as { timeout?: number }).timeout).toBe(GIT_NETWORK_TIMEOUT_MS);
   });
 
   it("preserves the workspace when a later phase of the SAME run revisits it", () => {
@@ -499,6 +546,10 @@ describe("prePopulateWorkspace recreate-from-base (build, issue #153)", () => {
     const clones = calledArgs().filter((a) => gitVerb(a) === "clone");
     expect(clones).toHaveLength(1);
     expect(clones[0]).not.toContain("--branch");
+    // Blobless so large binary history can't blow the clone timeout (#216).
+    expect(clones[0]).toContain("--filter=blob:none");
+    const cloneCall = mockExec.mock.calls.find((c) => gitVerb((c[1] as string[]) ?? []) === "clone")!;
+    expect((cloneCall[2] as { timeout?: number }).timeout).toBe(GIT_NETWORK_TIMEOUT_MS);
     const checkout = calledArgs().find((a) => a.includes("checkout"))!;
     expect(checkout[checkout.indexOf("checkout") + 1]).toBe("-B");
     expect(readFileSync(join(workDir, ".lastlight-run"), "utf-8")).toBe("run-1");
