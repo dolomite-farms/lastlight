@@ -545,3 +545,31 @@ describe("Sandbox orchestrator (FakeSandbox)", () => {
     expect(existsSync(join(sessionsDir, "projects"))).toBe(false);
   });
 });
+
+describe("failed sandboxes are kept for inspection", () => {
+  const dirs = { stateDir: "/tmp", sessionsDir: "/tmp/sessions" };
+
+  it("keeps a sandbox whose phase failed instead of disposing it", async () => {
+    const fake = new FakeSandbox({ throwOnRunAgent: "boom", keepable: true });
+    const result = await executeAgent("x", { sandbox: "none", ...dirs }, { sandboxFactory: fake.asFactory() });
+    expect(result.success).toBe(false);
+    expect(fake.kept).toBe(true);
+    expect(fake.disposed).toBe(false);
+  });
+
+  it("disposes a sandbox whose phase succeeded, and one that cannot be kept", async () => {
+    const ok = new FakeSandbox({ events: successEvents(), keepable: true });
+    expect((await executeAgent("x", { sandbox: "none", ...dirs }, { sandboxFactory: ok.asFactory() })).success).toBe(true);
+    expect(ok.kept).toBe(false);
+    expect(ok.disposed).toBe(true);
+    const unkeepable = new FakeSandbox({ throwOnRunAgent: "boom" });
+    await executeAgent("x", { sandbox: "none", ...dirs }, { sandboxFactory: unkeepable.asFactory() });
+    expect(unkeepable.disposed).toBe(true);
+  });
+
+  it("hands the sandbox the configured keepFailed policy (off in the packaged config)", async () => {
+    const fake = new FakeSandbox({ events: successEvents() });
+    await executeAgent("x", { sandbox: "none", ...dirs }, { sandboxFactory: fake.asFactory() });
+    expect(fake.keepFailed).toEqual({ hours: 0, max: 3 });
+  });
+});

@@ -328,6 +328,8 @@ export interface LastLightConfig {
   gate: GateConfig;
   /** The sandbox's default wall-clock budgets (issue #385), from `sandbox:`. */
   sandboxTimeouts: SandboxTimeoutsConfig;
+  /** Keep a failed phase's docker sandbox paused for inspection, from `sandbox.keepFailed`. */
+  sandboxKeepFailed: SandboxKeepFailedConfig;
   /**
    * Retry/escalation budgets for the PR_FIX_SHAPED workflows (issue #251) and
    * the major-bump auto-merge policy (issue #252). Both blocks resolve through
@@ -445,6 +447,18 @@ export interface KubernetesConfig {
    * `repoConfig.allowedImages`, because a repo does not choose it.
    */
   forwarderImage: string;
+}
+
+/**
+ * `sandbox.keepFailed` — hold a FAILED phase's sandbox container, paused, so the
+ * failure can be inspected (`docker unpause` / `docker exec`). Docker backend only.
+ * Off by default: `hours: 0` changes nothing.
+ */
+export interface SandboxKeepFailedConfig {
+  /** How long a failed phase's sandbox is kept. `0` disables keeping. */
+  hours: number;
+  /** At most this many kept sandboxes at once; the oldest are removed first. */
+  max: number;
 }
 
 export interface SandboxCleanupConfig {
@@ -822,6 +836,16 @@ export function defaultGateConfig(): GateConfig {
 /** The packaged sandbox timeouts, from `config/default.yaml`. */
 export function defaultSandboxTimeouts(): SandboxTimeoutsConfig {
   return { ...packagedFileConfig().sandboxTimeouts };
+}
+
+/** The packaged `sandbox.keepFailed` block — off. */
+export function defaultSandboxKeepFailed(): SandboxKeepFailedConfig {
+  return { ...packagedFileConfig().sandboxKeepFailed };
+}
+
+/** The operator's `sandbox.keepFailed` — boot config, else the packaged (off) one. */
+export function getSandboxKeepFailed(): SandboxKeepFailedConfig {
+  return currentConfig?.sandboxKeepFailed ?? defaultSandboxKeepFailed();
 }
 
 /** The operator's `gate:` block — boot config, else the packaged one. */
@@ -1213,6 +1237,7 @@ export function loadConfig(): LastLightConfig {
     autonomy: fileCfg.autonomy,
     gate: fileCfg.gate,
     sandboxTimeouts: fileCfg.sandboxTimeouts,
+    sandboxKeepFailed: fileCfg.sandboxKeepFailed,
     fix: fileCfg.fix,
     dependencies: fileCfg.dependencies,
     concurrency: fileCfg.concurrency,
@@ -1255,6 +1280,7 @@ function normalizeFileConfig(raw: Record<string, unknown>): {
   autonomy: AutonomyConfig;
   gate: GateConfig;
   sandboxTimeouts: SandboxTimeoutsConfig;
+  sandboxKeepFailed: SandboxKeepFailedConfig;
   fix: FixConfig;
   dependencies: DependenciesConfig;
   otel: OtelConfig;
@@ -1320,6 +1346,16 @@ function normalizeFileConfig(raw: Record<string, unknown>): {
     agentTimeoutSeconds: requiredSeconds(sandboxRaw.agentTimeoutSeconds, "sandbox.agentTimeoutSeconds"),
     commandTimeoutSeconds: requiredSeconds(sandboxRaw.commandTimeoutSeconds, "sandbox.commandTimeoutSeconds"),
     untilBashTimeoutSeconds: requiredSeconds(sandboxRaw.untilBashTimeoutSeconds, "sandbox.untilBashTimeoutSeconds"),
+  };
+  // Lenient, like the cleanup block: a mistyped value degrades to "off" (hours)
+  // or the shipped cap (max) rather than failing boot.
+  const keepFailedRaw = isPlainObject(sandboxRaw.keepFailed) ? sandboxRaw.keepFailed : {};
+  const sandboxKeepFailed: SandboxKeepFailedConfig = {
+    hours: nonNegativeNumber(keepFailedRaw.hours) ?? 0,
+    max:
+      typeof keepFailedRaw.max === "number" && Number.isInteger(keepFailedRaw.max) && keepFailedRaw.max > 0
+        ? keepFailedRaw.max
+        : 3,
   };
   const gate: GateConfig = {
     timeoutSeconds: requiredSeconds(gateRaw.timeoutSeconds, "gate.timeoutSeconds"),
@@ -1728,6 +1764,7 @@ function normalizeFileConfig(raw: Record<string, unknown>): {
     autonomy,
     gate,
     sandboxTimeouts,
+    sandboxKeepFailed,
     fix,
     dependencies,
     otel: normalizeOtelFileConfig(otelRaw),
@@ -2131,6 +2168,12 @@ function buildEnvConfigLayer(env: NodeJS.ProcessEnv): Record<string, unknown> {
     log.warn("Unknown LASTLIGHT_SANDBOX value — using the file/default backend", { value: backend });
   }
   if (env.MAX_TURNS) sandbox.maxTurns = parseInt(env.MAX_TURNS, 10);
+  const keepFailed: Record<string, unknown> = {};
+  const keepHours = parseFloat(env.LASTLIGHT_SANDBOX_KEEP_FAILED_HOURS ?? "");
+  if (Number.isFinite(keepHours)) keepFailed.hours = keepHours;
+  const keepMax = parseInt(env.LASTLIGHT_SANDBOX_KEEP_FAILED_MAX ?? "", 10);
+  if (Number.isFinite(keepMax)) keepFailed.max = keepMax;
+  if (Object.keys(keepFailed).length) sandbox.keepFailed = keepFailed;
   if (Object.keys(sandbox).length) layer.sandbox = sandbox;
 
   const buildAssetsLoc = (env.LASTLIGHT_BUILD_ASSETS || "").trim().toLowerCase();

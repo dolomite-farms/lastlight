@@ -7,6 +7,7 @@ import { AGENTIC_PROFILES, type GitAccessProfile } from "../engine/github/profil
 import { logger } from "../logging/logger.js";
 import { CGROUP_USAGE_SCRIPT, parseUsageLine, type ResourceUsage } from "./resource-usage.js";
 import type { ServiceSet } from "lastlight-shared/sandbox-services";
+import type { SandboxKeepFailedConfig } from "../config/config.js";
 import {
   buildServiceRunArgs,
   serviceContainerName,
@@ -79,6 +80,12 @@ export interface SandboxConfig {
    * honours HTTP_PROXY / HTTPS_PROXY.
    */
   dnsIp?: string;
+  /**
+   * `sandbox.keepFailed`: keep a failed phase's container (paused) instead of
+   * removing it. Absent, or `hours <= 0`, keeps nothing and runs no extra docker
+   * commands.
+   */
+  keepFailed?: SandboxKeepFailedConfig;
 }
 
 export interface SandboxInfo {
@@ -780,6 +787,43 @@ export class DockerSandbox {
     execSafe("docker", ["rm", "-f", info.containerName]);
     this.activeContainers.delete(taskId);
     log.info("Destroyed", { containerName: info.containerName });
+    this.sweepKept();
+  }
+
+  private get keepFailed(): SandboxKeepFailedConfig | undefined {
+    const keep = this.config.keepFailed;
+    return keep && keep.hours > 0 ? keep : undefined;
+  }
+
+  /**
+   * Keep a failed phase's sandbox for inspection: pause it and rename it
+   * `<name>-kept-<expiryEpochMs>`. The expiry is read back from the name by
+   * {@link sweepKeptSandboxes}, so it survives a harness restart. Resolves false
+   * (the caller destroys as usual) when keeping is disabled, the container is
+   * not running — e.g. a cancel killed it — or anything else goes wrong.
+   */
+  async keepForInspection(taskId: string): Promise<boolean> {
+    const keep = this.keepFailed;
+    const info = this.activeContainers.get(taskId);
+    if (!keep || !info) return false;
+    try {
+      await this.stopServices(taskId);
+      execCmd("docker", ["pause", info.containerName]);
+      execCmd("docker", ["rename", info.containerName, `${info.containerName}-kept-${Date.now() + keep.hours * 3_600_000}`]);
+    } catch (err) {
+      log.warn("Could not keep failed sandbox", { containerName: info.containerName, err });
+      return false;
+    }
+    this.activeContainers.delete(taskId);
+    log.info("Kept failed sandbox for inspection", { containerName: info.containerName, hours: keep.hours });
+    this.sweepKept();
+    return true;
+  }
+
+  /** Remove expired / surplus kept sandboxes. A no-op (no docker call) while keeping is off. */
+  private sweepKept(): void {
+    const keep = this.keepFailed;
+    if (keep) sweepKeptSandboxes(keep.max);
   }
 
   async destroyAll(): Promise<void> {
@@ -818,6 +862,31 @@ export class DockerSandbox {
     // Normal repo clone with a real .git directory needs no extra mount.
     return [];
   }
+}
+
+const KEPT_NAME = /^lastlight-sandbox-.+-kept-(\d+)$/;
+
+/**
+ * Which kept-sandbox names to remove: expired ones, then all but the newest
+ * `max` (by expiry). Names that are not `lastlight-sandbox-*-kept-<epochMs>` are
+ * never selected.
+ */
+export function keptSandboxesToRemove(names: string[], now: number, max: number): string[] {
+  const kept = names
+    .map((name) => ({ name, expires: Number(KEPT_NAME.exec(name)?.[1]) }))
+    .filter((k) => Number.isFinite(k.expires))
+    .sort((a, b) => b.expires - a.expires);
+  return kept.filter((k, i) => k.expires <= now || i >= max).map((k) => k.name);
+}
+
+/** Auto-cleanup of kept sandboxes; best effort. Runs after every keep and destroy while keeping is on. */
+export function sweepKeptSandboxes(max: number, now = Date.now()): void {
+  try {
+    const names = execCmd("docker", ["ps", "-a", "--filter", "name=lastlight-sandbox-", "--format", "{{.Names}}"])
+      .trim().split("\n").filter(Boolean);
+    const doomed = keptSandboxesToRemove(names, now, max);
+    if (doomed.length) execSafe("docker", ["rm", "-f", ...doomed]);
+  } catch { /* docker unavailable — nothing to sweep */ }
 }
 
 function execCmd(cmd: string, args: string[], opts?: { timeout?: number }): string {

@@ -8,6 +8,7 @@ import {
   defaultGateConfig,
   defaultReviewConfig,
   defaultSandboxTimeouts,
+  defaultSandboxKeepFailed,
   resetRuntimeConfigForTests,
 } from "#src/config/config.js";
 import { DIAGNOSIS_CLASSES } from "#src/engine/fix-markers.js";
@@ -469,6 +470,31 @@ describe("loadConfig — timeouts and the gate block (#385)", () => {
     // The pre-boot fallbacks are the SAME file through the SAME normaliser.
     expect(defaultSandboxTimeouts()).toEqual(config.sandboxTimeouts);
     expect(defaultGateConfig()).toEqual(config.gate);
+  });
+
+  it("ships sandbox.keepFailed off", () => {
+    const config = loadConfig();
+    expect(config.sandboxKeepFailed).toEqual({ hours: 0, max: 3 });
+    expect(defaultSandboxKeepFailed()).toEqual(config.sandboxKeepFailed);
+  });
+
+  it("lets the overlay turn sandbox.keepFailed on", () => {
+    vi.stubEnv("LASTLIGHT_OVERLAY_DIR", overlayWith("sandbox:\n  keepFailed:\n    hours: 6\n    max: 5\n"));
+    expect(loadConfig().sandboxKeepFailed).toEqual({ hours: 6, max: 5 });
+  });
+
+  it("lets env override sandbox.keepFailed", () => {
+    vi.stubEnv("LASTLIGHT_SANDBOX_KEEP_FAILED_HOURS", "1.5");
+    vi.stubEnv("LASTLIGHT_SANDBOX_KEEP_FAILED_MAX", "2");
+    expect(loadConfig().sandboxKeepFailed).toEqual({ hours: 1.5, max: 2 });
+  });
+
+  it.each([
+    ["hours: -1\n    max: 0", { hours: 0, max: 3 }],
+    ["hours: soon\n    max: 1.5", { hours: 0, max: 3 }],
+  ])("degrades a malformed sandbox.keepFailed to off / the default cap: %s", (body, expected) => {
+    vi.stubEnv("LASTLIGHT_OVERLAY_DIR", overlayWith(`sandbox:\n  keepFailed:\n    ${body}\n`));
+    expect(loadConfig().sandboxKeepFailed).toEqual(expected);
   });
 
   it("lets the overlay override a timeout", () => {

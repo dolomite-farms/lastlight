@@ -242,6 +242,11 @@ interface SandboxTimeouts {               // the `sandbox:` block's timeout leav
   untilBashTimeoutSeconds: number;        // a `generic_loop.until_bash` check default (30)
 }
 
+interface SandboxKeepFailed {             // `sandbox.keepFailed` — docker backend only
+  hours: number;                          // keep a FAILED phase's sandbox paused this long; 0 = off (default)
+  max: number;                            // at most this many kept at once, newest by expiry win (3)
+}
+
 interface DependenciesConfig {            // how far a MAJOR dependency bump may auto-merge
   autoMergeMaxImpact: "none" | "low" | "medium" | "high";  // PROMPT-LEVEL — see below
   requireSettledChecks: boolean;          // `mayMerge` demands settled-"passing"
@@ -843,6 +848,7 @@ against that repo (see the per-repository layer above). Thinking values are pi-a
 |---|---|---|
 | `LASTLIGHT_SANDBOX` | backend: `gondolin` / `docker` / `smol` / `none` / `kubernetes` | `gondolin` (config `sandbox.backend`) |
 | `MAX_TURNS` | agent loop budget per session | `200` (config `sandbox.maxTurns`) |
+| `LASTLIGHT_SANDBOX_KEEP_FAILED_HOURS` / `LASTLIGHT_SANDBOX_KEEP_FAILED_MAX` | docker only — override `sandbox.keepFailed.hours` / `.max` (keep a failed phase's paused sandbox for inspection) | `0` (off) / `3` |
 | `SANDBOX_MEMORY_LIMIT` | docker only — per-sandbox `--memory`/`--memory-swap`. Raised from `2g` because a type-aware `lastlight facts` pass peaks at 2.4–3.0 GB on a bare tree and 3.5–4.4 GB on an installed one; an OOM there exits 134 with no envelope, which a review cron then re-dispatches every 30 min. Lower it on a small host — the cost is n × this per concurrent sandbox. | `8g` |
 | `SANDBOX_DATA_VOLUME` | docker only — named volume or bind-mount path | `lastlight_agent-data` |
 | `LASTLIGHT_SANDBOX_NETWORK` | docker only | `lastlight_sandbox-egress` |
@@ -1199,6 +1205,7 @@ These have no env var — they're set in `config/default.yaml` or the overlay's
 | `models` / `variants` | maps | Per-task model / reasoning-effort. | **yes** |
 | `sandbox.backend` / `sandbox.maxTurns` / `sandbox.kubernetes` | see Sandbox above | Backend selection + the k8s block. | no |
 | `sandbox.{agentTimeoutSeconds,commandTimeoutSeconds,untilBashTimeoutSeconds}` | `1800` / `300` / `30` | Default budgets when a phase sets no `timeout_seconds`: one agent phase run (every backend — docker, smol, kubernetes `activeDeadlineSeconds`, gondolin), a `type: bash` / `type: script` phase, and a `generic_loop.until_bash` check. | no |
+| `sandbox.keepFailed.{hours,max}` | `0` / `3` | Docker backend only. With `hours > 0`, a FAILED phase's sandbox container is paused and renamed `<name>-kept-<expiryEpochMs>` instead of removed, so it can be inspected (`docker unpause`, `docker exec`). Expiry lives in the name, so it survives a harness restart; kept sandboxes past their expiry, and all but the newest `max`, are removed on every keep and teardown, and expired ones at boot. `hours: 0` keeps nothing and runs no docker commands for this. Env: `LASTLIGHT_SANDBOX_KEEP_FAILED_HOURS`, `LASTLIGHT_SANDBOX_KEEP_FAILED_MAX`. | no |
 | `gate.{timeoutSeconds,maxTimeoutSeconds,phaseTimeoutSeconds}` | `900` / `1500` / `2400` | One full build/test gate command; the operator ceiling on a repo's `timeoutSeconds`; the budget for a phase that runs a gate (build `guardrails_gate`, executor). Validated at load: `timeoutSeconds <= maxTimeoutSeconds < phaseTimeoutSeconds`. Seeded on the run context as `{{gate.timeoutSeconds}}` etc. | `timeoutSeconds` only, clamped |
 | `buildAssets.location` | `repo` \| `server` | Where build handoff docs live. | no |
 | `concurrency.maxWorkflows` / `.maxQueueWaitMs` | `4` / `3600000` | Global admission cap. | no |

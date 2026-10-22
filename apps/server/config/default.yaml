@@ -141,6 +141,15 @@ sandbox:
   agentTimeoutSeconds: 1800     # one agent phase run, when the phase sets no timeout_seconds
   commandTimeoutSeconds: 300    # a type: bash / type: script phase with no timeout_seconds
   untilBashTimeoutSeconds: 30   # a generic_loop until_bash check with no timeout_seconds
+  # Keep a FAILED phase's sandbox for inspection (docker backend only). The
+  # container is paused and renamed `<name>-kept-<expiry>`, so you can
+  # `docker unpause` + `docker exec` into it; it is removed once `hours` pass,
+  # and only the newest `max` are kept. `hours: 0` (the default) keeps nothing
+  # and never touches docker for this. Env overrides:
+  # LASTLIGHT_SANDBOX_KEEP_FAILED_HOURS / LASTLIGHT_SANDBOX_KEEP_FAILED_MAX.
+  keepFailed:
+    hours: 0
+    max: 3
 
 # The build/test GATE budget (issue #385) — one number for "a single full
 # build/test gate command" (install excluded), shared by the fix loops'

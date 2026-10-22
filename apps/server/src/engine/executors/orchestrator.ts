@@ -7,6 +7,7 @@ import {
   getGateConfig,
   getRuntimeConfig,
   getSandboxTimeouts,
+  getSandboxKeepFailed,
   type SandboxBackend,
 } from "../../config/config.js";
 import {
@@ -219,13 +220,25 @@ export async function withSandbox<T>(
     repoSubdir: ctx.config.repoSubdir,
     imageName: ctx.config.sandboxImage === "qa" ? SANDBOX_IMAGE_QA : undefined,
     otel: ctx.config.otel,
+    keepFailed: getSandboxKeepFailed(),
   });
   let provisioned: ProvisionResult | undefined;
+  let failed = false;
   try {
     provisioned = await sandbox.provision(ctx.prePopulate);
-    return await fn(sandbox, provisioned);
+    const result = await fn(sandbox, provisioned);
+    failed = (result as { success?: boolean } | undefined)?.success === false;
+    return result;
+  } catch (err) {
+    failed = true;
+    throw err;
   } finally {
-    if (provisioned) await sandbox.dispose();
+    // With `sandbox.keepFailed` on, a failed phase's sandbox is kept (paused)
+    // for inspection when the backend can; otherwise, or if keeping fails, it
+    // is disposed as usual.
+    if (provisioned && !(failed && (await sandbox.keepForInspection?.().catch(() => false)))) {
+      await sandbox.dispose();
+    }
   }
 }
 

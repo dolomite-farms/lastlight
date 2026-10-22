@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { spawn } from "child_process";
 import type { run as agenticRunType, RunResult, ThinkingLevel } from "agentic-pi";
 import type { CommandPolicy } from "lastlight-workflow-engine";
-import type { OtelConfig, SandboxBackend } from "../config/config.js";
+import type { OtelConfig, SandboxBackend, SandboxKeepFailedConfig } from "../config/config.js";
 import type { ServiceSet } from "lastlight-shared/sandbox-services";
 import { resolveKubernetesConfig } from "../config/config.js";
 import { createTaskSandbox, setupTaskWorktree, prePopulateWorkspace } from "./index.js";
@@ -95,6 +95,12 @@ export interface Sandbox {
    * own, and undefined means "not measured", never zero.
    */
   usage?(): Promise<ResourceUsage | undefined>;
+  /**
+   * After a FAILED phase, keep the sandbox (paused) for inspection instead of
+   * disposing it — `sandbox.keepFailed`. Resolves true when kept, and the
+   * caller then skips {@link dispose}. Optional; absent or false means dispose.
+   */
+  keepForInspection?(): Promise<boolean>;
 }
 
 /**
@@ -246,6 +252,8 @@ export interface SandboxFactoryOpts {
   repoSubdir?: string;
   /** Docker image override (the browser-QA image for `sandbox_image: qa`). */
   imageName?: string;
+  /** `sandbox.keepFailed` (docker only; the other backends ignore it). */
+  keepFailed?: SandboxKeepFailedConfig;
   otel?: OtelConfig;
   /**
    * Dependency services this phase runs against, already admitted against the
@@ -366,6 +374,7 @@ class DockerSandbox implements Sandbox {
       prePopulate: pre,
       dnsIp,
       imageName: this.opts.imageName,
+      keepFailed: this.opts.keepFailed,
     });
     if (!sbx) {
       throw new Error(
@@ -439,6 +448,10 @@ class DockerSandbox implements Sandbox {
 
   async dispose(): Promise<void> {
     if (this.sbx) await this.sbx.cleanup();
+  }
+
+  async keepForInspection(): Promise<boolean> {
+    return this.sbx ? this.sbx.sandbox.keepForInspection(this.opts.taskId) : false;
   }
 
   async usage(): Promise<ResourceUsage | undefined> {
@@ -831,6 +844,8 @@ export interface FakeBehavior {
   throwOnProvision?: Error | string;
   /** What `usage()` reports; omitted → undefined, as an in-process backend. */
   usage?: ResourceUsage;
+  /** `keepForInspection()` reports this (default false → disposed as usual). */
+  keepable?: boolean;
 }
 
 /**
@@ -854,6 +869,8 @@ export class FakeSandbox implements Sandbox {
   agentCwd = "";
   /** Captured from the factory opts — see {@link FakeSandbox.provision}. */
   repoSubdir?: string;
+  /** Captured from the factory opts — what `sandbox.keepFailed` resolved to. */
+  keepFailed?: SandboxKeepFailedConfig;
   stagedSkillDirs?: string[];
   receivedAgentOpts?: RunAgentOpts;
   receivedCommandOpts?: RunCommandOpts;
@@ -876,6 +893,7 @@ export class FakeSandbox implements Sandbox {
       this.env = opts.env;
       this.services = opts.services;
       this.repoSubdir = opts.repoSubdir;
+      this.keepFailed = opts.keepFailed;
       return this;
     };
   }
@@ -927,6 +945,14 @@ export class FakeSandbox implements Sandbox {
   async usage(): Promise<ResourceUsage | undefined> {
     this.usageReadBeforeDispose = !this.disposed;
     return this.behavior.usage;
+  }
+
+  /** Set when the orchestrator kept this sandbox for inspection. */
+  kept = false;
+
+  async keepForInspection(): Promise<boolean> {
+    this.kept = this.behavior.keepable ?? false;
+    return this.kept;
   }
 
   dispose(): void {

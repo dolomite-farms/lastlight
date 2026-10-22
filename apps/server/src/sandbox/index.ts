@@ -1,7 +1,8 @@
 import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { isAbsolute, join, relative, resolve, sep } from "path";
-import { DockerSandbox, type WorkspaceMount } from "./docker.js";
+import { DockerSandbox, keptSandboxesToRemove, type WorkspaceMount } from "./docker.js";
+import type { SandboxKeepFailedConfig } from "../config/config.js";
 import { SANDBOX_IMAGE, isSandboxAvailable } from "./images.js";
 import { githubBasicAuthB64, githubExtraheaderArgs } from "./git-http-auth.js";
 import { resetPrNotesJournal, resetVerifyScript } from "../engine/executors/shared.js";
@@ -25,10 +26,15 @@ export {
 export function cleanupOrphanedSandboxes(): void {
   try {
     const out = execFileSync("docker", [
-      "ps", "-q", "--filter", "name=lastlight-sandbox",
+      "ps", "--filter", "name=lastlight-sandbox", "--format", "{{.ID}} {{.Names}}",
     ], { encoding: "utf-8", timeout: 5000 });
 
-    const ids = out.trim().split("\n").filter(Boolean);
+    // Paused `-kept-` sandboxes (failed phases held for inspection, see
+    // `sandbox.keepFailed`) are not orphans: leave them to their own expiry,
+    // and remove the ones that have already expired.
+    const rows = out.trim().split("\n").filter(Boolean).map((l) => l.split(" "));
+    const expired = keptSandboxesToRemove(rows.map(([, name]) => name), Date.now(), Infinity);
+    const ids = rows.filter(([, name]) => !/-kept-\d+$/.test(name) || expired.includes(name)).map(([id]) => id);
     if (ids.length > 0) {
       log.info("Cleaning up orphaned sandbox containers", { count: ids.length });
       execFileSync("docker", ["rm", "-f", ...ids], { stdio: "ignore", timeout: 15000 });
@@ -145,6 +151,8 @@ export async function createTaskSandbox(opts: {
    * ensuring the image exists (see `qaImageAvailable`).
    */
   imageName?: string;
+  /** `sandbox.keepFailed` — see {@link DockerSandbox.keepForInspection}. */
+  keepFailed?: SandboxKeepFailedConfig;
 }): Promise<{ sandbox: DockerSandbox; workDir: string; cleanup: () => Promise<void> } | null> {
   if (!sandboxAvailable()) return null;
 
@@ -167,6 +175,7 @@ export async function createTaskSandbox(opts: {
     env: opts.env || {},
     memoryLimit: process.env.SANDBOX_MEMORY_LIMIT || undefined,
     dnsIp: opts.dnsIp,
+    keepFailed: opts.keepFailed,
   });
 
   try {
