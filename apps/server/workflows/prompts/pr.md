@@ -30,7 +30,7 @@ Use the MCP tool github_create_pull_request with the following:
 
 Note: There are unresolved reviewer issues after {{review.cycles}} fix cycles. See reviewer-verdict.md on the branch.{{/if}}
 
-{{#if autonomyMerge.auto}}AUTO-MERGE: this build ran as an autonomous pipeline stage
+{{#if autonomyMerge.auto && review.approved}}AUTO-MERGE: this build ran as an autonomous pipeline stage
 configured with `on_merge: auto`, so after the PR exists call
 `github_enable_auto_merge` for it (owner `{{owner}}`, repo `{{repo}}`, the PR you
 just created).
@@ -46,6 +46,10 @@ If auto-merge cannot be enabled — the repository has the feature disabled, or
 branch protection refuses it — then STOP. Say so plainly in the PR body (one
 line, naming the error GitHub returned) and leave the PR open for a human to
 land. Do not retry it as a direct merge.
+
+{{/if}}{{#if autonomyMerge.auto && !review.approved}}AUTO-MERGE WITHHELD: the reviewer never approved this build, so do NOT
+call `github_enable_auto_merge` and do NOT merge it by any other means. Leave the
+PR open for a human to review and land.
 
 {{/if}}Do NOT post a comment with the PR link — the harness adds it to the status
 checklist on the issue automatically. Just create the PR.

@@ -5,7 +5,8 @@
  *   {{varName}}            — simple variable substitution
  *   {{slugify varName}}    — slugify helper applied to a variable
  *   {{branchUrl file}}     — generate a GitHub branch URL for a file in issueDir
- *   {{#if varName}}...{{/if}} — conditional blocks (no nesting, truthy check)
+ *   {{#if varName}}...{{/if}} — conditional blocks (no nesting, truthy check;
+ *   `{{#if a && !b}}` requires every term)
  *   <!-- … -->              — MAINTAINER NOTE: stripped, never sent to the model
  */
 
@@ -186,19 +187,26 @@ export function renderTemplate(template: string, ctx: TemplateContext): string {
   // 2. Conditional blocks: {{#if varName}}...{{/if}} (supports dot notation).
   //    Key segments allow hyphens so phase/model keys like `pr-fix` resolve
   //    (e.g. {{models.pr-fix}}); \w alone would leave them unrendered.
+  //    Terms may be joined with `&&` ({{#if a && !b.c}}) — every term must hold.
+  //    There is no nesting, so this is how a block depends on two facts.
+  const isTruthy = (val: unknown): boolean =>
+    val !== undefined &&
+    val !== null &&
+    val !== "" &&
+    val !== false &&
+    val !== 0 &&
+    !(Array.isArray(val) && val.length === 0);
   result = result.replace(
-    /\{\{#if\s+(!?)([\w-]+(?:\.[\w-]+)*)\}\}([\s\S]*?)\{\{\/if\}\}/g,
-    (_match, negate, varName, body) => {
-      const val = walkKey(varName);
+    /\{\{#if\s+(!?[\w-]+(?:\.[\w-]+)*(?:\s*&&\s*!?[\w-]+(?:\.[\w-]+)*)*)\}\}([\s\S]*?)\{\{\/if\}\}/g,
+    (_match, condition: string, body: string) => {
       // Truthy: non-empty string, non-zero number, non-empty array, true boolean
-      const truthy =
-        val !== undefined &&
-        val !== null &&
-        val !== "" &&
-        val !== false &&
-        val !== 0 &&
-        !(Array.isArray(val) && val.length === 0);
-      return (negate ? !truthy : truthy) ? body : "";
+      const holds = condition.split("&&").every((term) => {
+        const t = term.trim();
+        const negate = t.startsWith("!");
+        const truthy = isTruthy(walkKey(negate ? t.slice(1) : t));
+        return negate ? !truthy : truthy;
+      });
+      return holds ? body : "";
     }
   );
 

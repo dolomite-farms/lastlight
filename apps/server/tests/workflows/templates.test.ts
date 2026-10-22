@@ -297,6 +297,31 @@ describe("renderTemplate — conditional blocks", () => {
     expect(result).toContain("CI failures:");
     expect(result).toContain("failures here");
   });
+  describe("&& (every term must hold)", () => {
+    const tmpl = "{{#if a && b.ok}}both{{/if}}";
+
+    it("renders only when every term is truthy", () => {
+      expect(renderTemplate(tmpl, { ...BASE_CTX, a: true, b: { ok: true } })).toBe("both");
+      expect(renderTemplate(tmpl, { ...BASE_CTX, a: true, b: { ok: false } })).toBe("");
+      expect(renderTemplate(tmpl, { ...BASE_CTX, a: false, b: { ok: true } })).toBe("");
+    });
+
+    it("treats a missing term as false", () => {
+      expect(renderTemplate(tmpl, { ...BASE_CTX, a: true })).toBe("");
+    });
+
+    it("negates a single term", () => {
+      const neg = "{{#if a && !b.ok}}withheld{{/if}}";
+      expect(renderTemplate(neg, { ...BASE_CTX, a: true, b: { ok: false } })).toBe("withheld");
+      expect(renderTemplate(neg, { ...BASE_CTX, a: true })).toBe("withheld");
+      expect(renderTemplate(neg, { ...BASE_CTX, a: true, b: { ok: true } })).toBe("");
+    });
+
+    it("resolves terms through phaseOutputs like a single-term condition", () => {
+      const ctx = { ...BASE_CTX, a: true, phaseOutputs: { b: { ok: true } } };
+      expect(renderTemplate(tmpl, ctx)).toBe("both");
+    });
+  });
 });
 
 describe("renderTemplate — artifactBaseUrl (inline screenshot embeds)", () => {
