@@ -4,6 +4,10 @@ import type { GitHubClient } from "../engine/github/github.js";
 import type { ModelConfig, VariantConfig } from "../config/config.js";
 import { runWorkflow, type ApprovalGateConfig, type RunnerCallbacks } from "./runner.js";
 import { getWorkflow } from "./loader.js";
+import { isPerTargetRecreate } from "./target-policy.js";
+import { discardStaleBuild } from "./stale-base.js";
+import { sandboxRoot } from "../sandbox/reap.js";
+import { join, resolve } from "path";
 import {
   restoreRepoRunConfig,
   workflowScopedTaskId,
@@ -487,6 +491,21 @@ export async function resumeSimpleRun(run: WorkflowRun, opts: ResumeOptions): Pr
         buildAssetsRelocated: issueDir.startsWith("../"),
       }
     : opts.config;
+
+  // A retried build must not replay cached phases onto a branch main has moved
+  // past on the same files: rebuild from current main instead.
+  if (opts.github && isPerTargetRecreate(run.workflowName)) {
+    await discardStaleBuild({
+      db: opts.db,
+      github: opts.github,
+      runId: run.id,
+      workflowName: run.workflowName,
+      phases: definition.phases.map((p) => p.name),
+      owner,
+      repo,
+      repoDir: join(sandboxRoot(opts.config.stateDir || resolve("data"), opts.config.sandboxDir), taskId, repo),
+    });
+  }
 
   try {
     const result = await runWorkflow(

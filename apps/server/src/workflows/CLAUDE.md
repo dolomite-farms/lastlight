@@ -59,6 +59,13 @@ owner/repo/issueNumber context), retry reconstructs the full context from the
 stored `workflow_runs.context` + `scratch`, so it also retries Slack-thread-scoped
 runs (e.g. an `explore` started from Slack).
 
+A retried `per-target-recreate` build (`build`, `build-ui`) first checks that its
+base is still fresh (`stale-base.ts → discardStaleBuild`): if the default branch
+has moved onto files the run's checkout also changed, the checkout is deleted and
+the `executor` phase onward is reopened (`reopenPhases`), so the retry rebuilds
+from current main instead of replaying cached phases onto an old branch. The
+check never fails the run — any error keeps the old resume behaviour.
+
 > **Caveat — skipped phases don't re-expose outputs.** A phase skipped on resume
 > because its ledger row is already `success=1` contributes **nothing** to the
 > in-memory `outputs` map: `PhaseExecutor.runStandard` returns no `outputVars` on
