@@ -803,6 +803,13 @@ autonomy:
       running: agent-building
       on_success: ready-for-human  # terminal — a human reviews, and merges, the PR
       on_failure: agent-blocked    # terminal — the run stopped; a human reads why
+      # OPTIONAL, unset by default. With `on_merge: auto`, a build whose LAST
+      # review was APPROVED and whose PR is on GitHub auto-merge has nothing left
+      # for a human, so `on_success` ("a human reviews, and merges, the PR") would
+      # misreport it. Set a label here (e.g. `agent-pr-open`) and that case lands
+      # on it instead; an unapproved build or a parked PR still lands on
+      # `on_success`.
+      # on_auto_merge: agent-pr-open
       workflow: build
       # Human-in-the-loop approval gates, ON by default and merged ADD-ONLY onto
       # the run's effective approval map: this block can turn a gate ON that the

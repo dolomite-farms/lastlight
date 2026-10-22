@@ -223,7 +223,7 @@ export async function applyBuildDispatchGate(
       // was then re-run successfully keeps `agent-blocked` alongside its new
       // `ready-for-human`, and the board files it under the older verdict.
       // Best-effort by contract; a stale label is untidy, never unsafe.
-      alsoRemove: [stage.on_success, stage.on_failure],
+      alsoRemove: [stage.on_success, stage.on_failure, ...(stage.on_auto_merge ? [stage.on_auto_merge] : [])],
     },
     { github: deps.github },
   );

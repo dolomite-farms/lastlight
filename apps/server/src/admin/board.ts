@@ -19,9 +19,10 @@
  * from a mockup; they are examples, not a schema, and a board that shows
  * columns nothing writes to is a board that lies.
  *
- * Each stage contributes its four labels in pipeline order — `enter`,
- * `running`, `on_success`, `on_failure` — which is what turns one configured
- * stage into a legible four-column board rather than a single column. Labels
+ * Each stage contributes its labels in pipeline order — `enter`, `running`,
+ * `on_success`, the optional `on_auto_merge`, `on_failure` — which is what turns
+ * one configured stage into a legible four-column board rather than a single
+ * column. Labels
  * repeated across stages collapse onto their first column: a card carrying the
  * label belongs in one place, and the earlier position is the one the pipeline
  * reaches first.
@@ -35,7 +36,7 @@
  * `ambiguousStage: true` so the UI shows the pair rather than silently picking.
  *
  * WHICH column it lands in is decided by the latest run, when there is one:
- * a `succeeded` run means the `on_success` column and a `failed` one means
+ * a `succeeded` run means the `on_success` (or `on_auto_merge`) column and a `failed` one means
  * `on_failure`, because the run is the FACT and the labels are its projection.
  * Column order alone gets this wrong in the case that actually happens — an
  * issue that failed, was re-run, and succeeded carries both terminal labels,
@@ -144,6 +145,8 @@ export interface BoardStage {
   enter: string;
   running: string;
   on_success: string;
+  /** Optional: only stages that route auto-merged builds elsewhere have one. */
+  on_auto_merge?: string;
   on_failure: string;
 }
 
@@ -311,7 +314,7 @@ function titleForLabel(label: string): string {
  * collapsing a label two stages share onto its first column.
  */
 function columnsForStages(stages: BoardStage[]): Array<{ id: string; title: string; label: string }> {
-  const slots: Array<keyof Omit<BoardStage, "id">> = ["enter", "running", "on_success", "on_failure"];
+  const slots: Array<keyof Omit<BoardStage, "id">> = ["enter", "running", "on_success", "on_auto_merge", "on_failure"];
   const seen = new Set<string>();
   const out: Array<{ id: string; title: string; label: string }> = [];
   for (const stage of stages) {
@@ -547,13 +550,14 @@ export function buildBoard(input: BuildBoardInput, opts: BuildBoardOptions = {})
     if (matches > 1 && baseRun) {
       const wanted =
         baseRun.status === "succeeded"
-          ? ".on_success"
+          ? [".on_success", ".on_auto_merge"]
           : baseRun.status === "failed" || baseRun.status === "cancelled"
-            ? ".on_failure"
+            ? [".on_failure"]
             : null;
       if (wanted) {
-        const byRun = matched.find((at) => defs[at]!.id.endsWith(wanted));
-        if (byRun !== undefined) index = byRun;
+        // Right-most of the wanted side's columns: a success carries up to two.
+        const byRun = matched.filter((at) => wanted.some((slot) => defs[at]!.id.endsWith(slot)));
+        if (byRun.length) index = Math.max(...byRun);
       }
     }
 

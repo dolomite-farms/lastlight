@@ -1023,8 +1023,11 @@ The stage observer is the second and final call site of `advanceStage`. The firs
 | Run status | Label it advances to |
 |---|---|
 | `succeeded` | the stage's `on_success` (packaged: `ready-for-human`) |
+| `succeeded`, review APPROVED, PR on auto-merge | the stage's `on_auto_merge`, **only when the stage configures one** and has `on_merge: auto` (not set in the packaged config) |
 | `failed` | the stage's `on_failure` (packaged: `agent-blocked`) |
 | `cancelled` | the stage's `on_failure` — from the issue's point of view a cancel and a failure are the same fact: the build did not get there and a person needs to look. Leaving a cancelled run on `agent-building` would strand it exactly as before |
+
+The `on_auto_merge` row exists because a succeeded run says nothing about the review: a reviewer loop that runs out of fix cycles still on `REQUEST_CHANGES` opens its PR and succeeds. The observer reads the run's last persisted review row (`reviewer`, then each `reviewer_recheck_N`; the newest wins, no verdict reads as not approved) and then asks GitHub whether the build's PR — found by its head branch — is actually on auto-merge or already merged. Both must hold; a PR the agent left parked because auto-merge could not be armed, a missing branch or PR, and a failing GitHub read all fall back to `on_success`, the label that asks a human to look. `on_auto_merge` is also a board column (between `on_success` and `on_failure`), a legal label for the board's drag-and-drop writes, and is cleared by the dispatch gate when a new run starts.
 
 **`paused` is structurally unreachable here**, and that is load-bearing rather than incidental. `TerminalRunObserver` is typed to receive only the three statuses above, so a run sitting on an approval gate moves no label at all. That is the correct behaviour: an HITL pause means the work is still in flight while a human decides, so advancing the label there would report a build as finished mid-run — and then move it a second time when the resumed run actually finished. The type is what prevents it; every status is named explicitly rather than swept up by an `else`, so a fourth terminal status becomes a compile error instead of a silent mis-labelling.
 

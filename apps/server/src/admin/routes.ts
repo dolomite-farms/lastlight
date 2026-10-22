@@ -106,8 +106,8 @@ const MAX_BOARD_REPOS = 20;
 const ISSUE_DISPATCH_ROUTE_KEYS = ["issue_opened", "issue_labeled", "issue_build"] as const;
 
 /** The four label slots a stage declares, in pipeline order. */
-type StageSlot = "enter" | "running" | "on_success" | "on_failure";
-const STAGE_SLOTS: readonly StageSlot[] = ["enter", "running", "on_success", "on_failure"];
+type StageSlot = "enter" | "running" | "on_success" | "on_auto_merge" | "on_failure";
+const STAGE_SLOTS: readonly StageSlot[] = ["enter", "running", "on_success", "on_auto_merge", "on_failure"];
 
 /**
  * Which stage — and which of its four slots — a configured label names.
@@ -2287,6 +2287,7 @@ export function createAdminRoutes(
       enter: stage.enter,
       running: stage.running,
       on_success: stage.on_success,
+      on_auto_merge: stage.on_auto_merge,
       on_failure: stage.on_failure,
     }));
 
@@ -3695,7 +3696,7 @@ export function createAdminRoutes(
     // that is inert out of the box.
     const configuredLabels = new Set<string>();
     for (const stage of Object.values(getAutonomyConfig().stages)) {
-      for (const label of [stage.enter, stage.running, stage.on_success, stage.on_failure]) {
+      for (const label of [stage.enter, stage.running, stage.on_success, stage.on_auto_merge, stage.on_failure]) {
         if (label) configuredLabels.add(label);
       }
     }

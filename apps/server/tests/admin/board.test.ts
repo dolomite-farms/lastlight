@@ -525,6 +525,25 @@ describe("buildBoard — breaking a two-label tie", () => {
     expect(columnOf(board, `${REPO}#4`)?.id).toBe("build.on_failure");
   });
 
+  it("places a card by its configured on_auto_merge column, between success and failure", () => {
+    const stage: BoardStage = { ...BUILD_STAGE, on_auto_merge: "agent-pr-open" };
+    const board = build([item(5, ["agent-pr-open"]), item(6, ["ready-for-human", "agent-pr-open"])], {
+      stages: [stage],
+      runs: new Map([[`${REPO}#6`, run("succeeded")]]),
+    });
+    if (!("columns" in board)) throw new Error("expected a configured board");
+    expect(board.columns.map((c) => c.id)).toEqual([
+      "build.enter",
+      "build.running",
+      "build.on_success",
+      "build.on_auto_merge",
+      "build.on_failure",
+    ]);
+    expect(columnOf(board, `${REPO}#5`)?.id).toBe("build.on_auto_merge");
+    // Two success-side labels and a succeeded run: right-most of the two, never the failure column.
+    expect(columnOf(board, `${REPO}#6`)?.id).toBe("build.on_auto_merge");
+  });
+
   it("treats a cancelled run as a failure for placement", () => {
     const board = build([item(4, BOTH)], { runs: new Map([[`${REPO}#4`, run("cancelled")]]) });
     expect(columnOf(board, `${REPO}#4`)?.id).toBe("build.on_failure");

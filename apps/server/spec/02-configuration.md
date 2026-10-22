@@ -208,6 +208,8 @@ interface AutonomyStageConfig {
   on_success: string;                     // terminal label ("ready-for-human"), written by the terminal-run observer
   on_failure: string;                     // terminal label ("agent-blocked"), on a failed OR cancelled run
                                           // — and on a budget-exhausted refusal, as the comment's dedup key
+  on_auto_merge?: string;                 // OPTIONAL terminal label for a succeeded build whose last review was
+                                          // APPROVED and whose PR is on GitHub auto-merge. Unset ⇒ on_success
   workflow: string;                       // the workflow this stage dispatches ("build")
   gates: Record<string, boolean>;         // HITL approval gates, unioned ADD-ONLY onto the run's map
   on_merge: "none" | "auto" | "auto-low-impact";  // "auto-low-impact" is NOT IMPLEMENTED — behaves as "none"

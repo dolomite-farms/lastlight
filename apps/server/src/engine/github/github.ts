@@ -1051,6 +1051,32 @@ export class GitHubClient {
   }
 
   /**
+   * The pull request opened from `branch` in this same repository, in any state
+   * (a build's PR may already be merged by the time its run is read back). The
+   * newest wins. `head` filters on `owner:branch`, but a fork's identically
+   * named branch also matches that filter in some cases, so the head repo is
+   * checked too. Carries `auto_merge` (non-null while GitHub auto-merge is
+   * armed) and `merged_at`.
+   */
+  async findPullRequestByHead(owner: string, repo: string, branch: string) {
+    const kit = await this.kit(owner);
+    const { data } = await kit.rest.pulls.list({
+      owner,
+      repo,
+      state: "all",
+      head: `${owner}:${branch}`,
+      sort: "created",
+      direction: "desc",
+      per_page: 100,
+    });
+    return data.find(
+      (pr) =>
+        pr.head.ref === branch &&
+        pr.head.repo?.full_name.toLowerCase() === `${owner}/${repo}`.toLowerCase(),
+    );
+  }
+
+  /**
    * The OPEN pull request whose HEAD is this commit — the fork-PR answer to a
    * question `check_suite` / `check_run` payloads cannot answer themselves.
    *

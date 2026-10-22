@@ -116,6 +116,24 @@ describe("loadConfig — the autonomy block", () => {
     expect(stages.later.on_merge).toBe("auto-low-impact");
   });
 
+  it("reads an optional on_auto_merge label, and omits the key when unset", () => {
+    vi.stubEnv(
+      "LASTLIGHT_OVERLAY_DIR",
+      overlayWith(
+        "autonomy:\n  stages:\n    build:\n      enter: ready-for-agent\n      on_auto_merge: ' agent-pr-open '\n" +
+          "    later:\n      enter: ready-for-later\n",
+      ),
+    );
+
+    const stages = loadConfig().autonomy.stages;
+    expect(stages.build.on_auto_merge).toBe("agent-pr-open");
+    expect(stages.later).not.toHaveProperty("on_auto_merge");
+  });
+
+  it("ships without an on_auto_merge label", () => {
+    expect(loadConfig().autonomy.stages.build).not.toHaveProperty("on_auto_merge");
+  });
+
   it("keeps only boolean gate leaves — a non-boolean is not an approval decision", () => {
     vi.stubEnv(
       "LASTLIGHT_OVERLAY_DIR",

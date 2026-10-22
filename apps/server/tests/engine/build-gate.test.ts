@@ -158,6 +158,19 @@ describe("applyBuildDispatchGate", () => {
     expect(removed).not.toContain(STAGE_AGENT_BUILDING);
   });
 
+  it("clears a configured on_auto_merge label too when a new run starts", async () => {
+    writeFileSync(
+      join(overlayDir, "config.yaml"),
+      `autonomy:\n  repos:\n    - "${REPO}"\n  stages:\n    build:\n      on_merge: auto\n      on_auto_merge: agent-pr-open\n`,
+    );
+    loadConfig();
+    const github = fakeGithub();
+
+    await applyBuildDispatchGate(args({ labels: [STAGE_READY_FOR_AGENT, "agent-pr-open"] }), { db, github });
+
+    expect(github.removeLabel.mock.calls.map((c: unknown[]) => c[3])).toContain("agent-pr-open");
+  });
+
   it("dispatches a clean issue — and advances the label BEFORE the run, entry off", async () => {
     const github = fakeGithub();
 

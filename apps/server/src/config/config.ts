@@ -542,6 +542,14 @@ export interface AutonomyStageConfig {
   running: string;
   on_success: string;
   on_failure: string;
+  /**
+   * Optional terminal label for a build that succeeded, whose final review
+   * verdict was APPROVED and whose PR is now waiting on GitHub auto-merge
+   * (`on_merge: auto`). Nothing is left for a human to review or merge, so
+   * `on_success` ("a human reviews, and merges, the PR") would misreport it.
+   * Unset (the shipped default): every successful build lands on `on_success`.
+   */
+  on_auto_merge?: string;
   /** The workflow this stage dispatches (`build`). */
   workflow: string;
   /**
@@ -782,6 +790,7 @@ function normalizeAutonomyStages(raw: unknown): Record<string, AutonomyStageConf
       running: autonomyLabel(value.running),
       on_success: autonomyLabel(value.on_success),
       on_failure: autonomyLabel(value.on_failure),
+      ...(autonomyLabel(value.on_auto_merge) ? { on_auto_merge: autonomyLabel(value.on_auto_merge) } : {}),
       workflow: autonomyLabel(value.workflow),
       gates: booleanMap(value.gates),
       // Coerced, not rejected: `none` is the only value that costs nothing, so

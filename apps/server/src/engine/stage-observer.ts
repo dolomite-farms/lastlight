@@ -10,6 +10,7 @@
  *
  * ```
  * agent-building ──▶ ready-for-human   (succeeded)
+ *                ├──▶ on_auto_merge     (succeeded, review APPROVED, PR on auto-merge — opt-in)
  *                └──▶ agent-blocked     (failed | cancelled)
  * ```
  *
@@ -54,6 +55,7 @@
 import { advanceStage } from "./stage-advance.js";
 import { getAutonomyConfig, type AutonomyStageConfig } from "../config/config.js";
 import { logger } from "../logging/logger.js";
+import { PhaseRef } from "../workflows/phase-ref.js";
 import type { StateDb } from "../state/db.js";
 import type { WorkflowRun } from "../state/workflow-run-store.js";
 import type { GitHubClient } from "./github/github.js";
@@ -162,6 +164,57 @@ function locate(run: WorkflowRun): { owner: string; repo: string; issueNumber: n
   return { owner: match[1], repo: match[2], issueNumber: Number(match[3]) };
 }
 
+/**
+ * Did the run's LAST review say APPROVED?
+ *
+ * A succeeded run proves nothing about the review: when the reviewer loop runs
+ * out of fix cycles still on REQUEST_CHANGES the build carries on to open its
+ * PR and succeeds. The verdict is the loop's own persisted phase rows
+ * (`reviewer`, then `reviewer_recheck_N` after each fix), so the newest one
+ * wins and an earlier approval can never outlive a later REQUEST_CHANGES. No
+ * verdict at all reads as not approved.
+ */
+function lastReviewApproved(run: WorkflowRun): boolean {
+  for (const entry of [...run.phaseHistory].reverse()) {
+    const kind = PhaseRef.parse(entry.phase).kind;
+    if (kind !== "phase" && kind !== "recheck") continue;
+    const summary = entry.summary?.trim() ?? "";
+    if (summary === "APPROVED") return entry.success;
+    if (summary.startsWith("REQUEST_CHANGES")) return false;
+  }
+  return false;
+}
+
+/**
+ * The stage's `on_auto_merge` label, when this succeeded build has nothing left
+ * for a human to do: the review ended APPROVED and its PR is waiting on GitHub
+ * auto-merge (or already merged). `null` — "use `on_success`" — in every other
+ * case, including a GitHub read that fails, because the wrong answer there must
+ * be the one that asks a human to look.
+ *
+ * The auto-merge fact is read off the PR itself rather than inferred from the
+ * run: the agent is told to leave the PR open for a human when GitHub refuses
+ * to arm auto-merge, and the run still succeeds in that case.
+ */
+async function autoMergeLabel(
+  run: WorkflowRun,
+  stage: AutonomyStageConfig,
+  where: { owner: string; repo: string },
+  github: GitHubClient | null,
+): Promise<string | null> {
+  if (!stage.on_auto_merge || stage.on_merge !== "auto" || !github) return null;
+  if (!lastReviewApproved(run)) return null;
+  const branch = run.context?.branch;
+  if (typeof branch !== "string" || !branch) return null;
+  try {
+    const pr = await github.findPullRequestByHead(where.owner, where.repo, branch);
+    return pr && (pr.auto_merge || pr.merged_at) ? stage.on_auto_merge : null;
+  } catch (err: unknown) {
+    log.warn("Cannot read the build's PR; keeping the success label", { runId: run.id, err });
+    return null;
+  }
+}
+
 /** The async half — everything the synchronous observer fires and forgets. */
 async function advanceTerminalStage(
   run: WorkflowRun,
@@ -196,7 +249,7 @@ async function advanceTerminalStage(
     return;
   }
 
-  const to = targetLabel(stage, status);
+  const to = (status === "succeeded" && (await autoMergeLabel(run, stage, where, deps.github))) || targetLabel(stage, status);
   const advance = await advanceStage(
     { ...where, from: stage.running, to },
     { github: deps.github },
