@@ -170,6 +170,24 @@ describe("chat model resolution with a provider endpoint override", () => {
     expect(resolved.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
 
+  it("synthesized model is text-only unless the provider declares image input", () => {
+    installProviderOverrides({
+      plain: { baseUrl: "https://gw/v1" },
+      vision: { baseUrl: "https://gw/v1", input: ["text", "image"] },
+    });
+    expect(resolveModel("plain/m").input).toEqual(["text"]);
+    expect(resolveModel("vision/m").input).toEqual(["text", "image"]);
+  });
+
+  it("synthesized model has no reasoning unless the provider declares it", () => {
+    installProviderOverrides({
+      plain: { baseUrl: "https://gw/v1" },
+      thinker: { baseUrl: "https://gw/v1", reasoning: true },
+    });
+    expect(resolveModel("plain/m").reasoning).toBe(false);
+    expect(resolveModel("thinker/m").reasoning).toBe(true);
+  });
+
   it("honours the declared dialect when the gateway speaks Anthropic", () => {
     installProviderOverrides({ acme: { baseUrl: "https://gw/anthropic", api: "anthropic-messages" } });
     expect(resolveModel("acme/my-model").api).toBe("anthropic-messages");

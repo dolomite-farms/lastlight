@@ -4,6 +4,11 @@ import type { GitHubClient } from "../engine/github/github.js";
 import type { ModelConfig, VariantConfig } from "../config/config.js";
 import { runWorkflow, type ApprovalGateConfig, type RunnerCallbacks } from "./runner.js";
 import { getWorkflow } from "./loader.js";
+import { isPerTargetRecreate } from "./target-policy.js";
+import { discardStaleBuild } from "./stale-base.js";
+import { sandboxRoot } from "../sandbox/reap.js";
+import { join, resolve } from "path";
+import { issueHoldCheck } from "./hold.js";
 import {
   restoreRepoRunConfig,
   workflowScopedTaskId,
@@ -121,6 +126,7 @@ function makeCallbacks(
   runId: string,
 ): RunnerCallbacks {
   return {
+    beforePhase: issueHoldCheck(github, workflowName, owner, repo, issueNumber),
     postComment: github && issueNumber
       ? async (msg: string) => {
           try {
@@ -405,6 +411,7 @@ export async function resumeSimpleRun(run: WorkflowRun, opts: ResumeOptions): Pr
     if (ch && th) {
       const poster = opts.slackPoster;
       slackCallbacks = {
+        beforePhase: issueHoldCheck(opts.github, run.workflowName, owner, repo, issueNumber),
         postComment: async (msg: string) => {
           try { await poster(ch, th, msg); }
           catch (err: unknown) {
@@ -488,6 +495,21 @@ export async function resumeSimpleRun(run: WorkflowRun, opts: ResumeOptions): Pr
       }
     : opts.config;
 
+  // A retried build must not replay cached phases onto a branch main has moved
+  // past on the same files (#160): rebuild from current main instead.
+  if (opts.github && isPerTargetRecreate(run.workflowName)) {
+    await discardStaleBuild({
+      db: opts.db,
+      github: opts.github,
+      runId: run.id,
+      workflowName: run.workflowName,
+      phases: definition.phases.map((p) => p.name),
+      owner,
+      repo,
+      repoDir: join(sandboxRoot(opts.config.stateDir || resolve("data"), opts.config.sandboxDir), taskId, repo),
+    });
+  }
+
   try {
     const result = await runWorkflow(
       definition,
@@ -520,9 +542,11 @@ export async function resumeSimpleRun(run: WorkflowRun, opts: ResumeOptions): Pr
       await opts.db.runs.requeueRunning(run.id);
       log.info("Requeued — cluster at capacity", { workflowName: run.workflowName, runId: run.id });
     } else {
-      await opts.db.runs.finishRun(run.id, "failed", {
-        error: result.phases.find((p) => !p.success)?.error || "workflow failed during resume",
-      });
+      if ((await opts.db.runs.getRun(run.id))?.status !== "cancelled") {
+        await opts.db.runs.finishRun(run.id, "failed", {
+          error: result.phases.find((p) => !p.success)?.error || "workflow failed during resume",
+        });
+      }
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

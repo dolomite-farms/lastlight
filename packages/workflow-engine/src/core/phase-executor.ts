@@ -79,6 +79,14 @@ export interface PhaseRunContext {
   botName: string;
 }
 
+/** A hold was applied between phases; stop the workflow without failing it. */
+export class PhaseHeldError extends Error {
+  constructor(readonly phase: string, label: string) {
+    super(`held by ${label}`);
+    this.name = "PhaseHeldError";
+  }
+}
+
 // ── Module-level helpers (moved here from runner.ts) ─────────────────────────
 
 /**
@@ -523,7 +531,13 @@ export class PhaseExecutor {
     private readonly reporter: PhaseReporter,
     private readonly resolver: PhaseResolver,
     private readonly ports: EnginePorts,
+    private readonly beforePhase?: (phase: string) => Promise<string | undefined>,
   ) {}
+
+  private async checkHold(phase: string): Promise<void> {
+    const label = await this.beforePhase?.(phase);
+    if (label) throw new PhaseHeldError(phase, label);
+  }
 
   /** The dedup-ledger seams, bundled from the injected ports + run store. */
   private get ledgerDeps(): AgentLedgerDeps {
@@ -551,6 +565,8 @@ export class PhaseExecutor {
       // Unknown node — shouldn't happen; treat as a no-op success.
       return { results: [{ phase: node.name, success: true, output: "" }], status: "succeeded" };
     }
+
+    await this.checkHold(node.name);
 
     const phaseType = phase.type ?? "agent";
     if (phaseType === "context") return this.runContext(phase);
@@ -607,6 +623,7 @@ export class PhaseExecutor {
     model?: string,
     variant?: string,
   ): Promise<RunPhaseResult> {
+    await this.checkHold(label);
     const { definition, config, workflowId, githubAccess, taskId, triggerId } = this.run;
     return runPhase(
       definition.name,
@@ -886,6 +903,7 @@ export class PhaseExecutor {
     phase: PhaseDefinition,
     iteration: number,
   ): Promise<boolean> {
+    await this.checkHold(PhaseRef.iterCheck(phase.name, iteration).format());
     const { config, githubAccess, taskId, triggerId, definition, workflowId, store: db } = this.run;
     const log = this.ports.logger ?? noopLogger;
     const label = PhaseRef.iterCheck(phase.name, iteration).format();

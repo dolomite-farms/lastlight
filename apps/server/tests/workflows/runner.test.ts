@@ -560,6 +560,7 @@ function makeMockDb(currentPhase = "phase_0"): StateDb {
       finishRun: vi.fn(),
       setRunning: vi.fn(),
       setPaused: vi.fn(),
+      cancelRun: vi.fn(),
     },
     approvals: {
       create: vi.fn(),
@@ -883,6 +884,75 @@ describe("runWorkflow — callbacks", () => {
     expect(started).toContain("executor");
     expect(ended).toContain("architect");
     expect(ended).toContain("executor");
+  });
+
+  it("cancels before a phase when the target is held and records the phase summary", async () => {
+    const db = makeMockDb();
+    mockExecuteAgent.mockResolvedValue(makeSuccessResult());
+
+    const result = await runWorkflow(
+      SIMPLE_WORKFLOW,
+      BASE_CTX,
+      {} as never,
+      { beforePhase: async (phase) => phase === "architect" ? "lastlight-ignore" : undefined },
+      db,
+      undefined,
+      undefined,
+      "wf-held-1",
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.phases.at(-1)).toMatchObject({
+      phase: "architect",
+      success: false,
+      output: "held by lastlight-ignore",
+    });
+    expect(db.runs.cancelRun).toHaveBeenCalledWith("wf-held-1");
+    expect(db.runs.appendPhase).toHaveBeenCalledWith(
+      "wf-held-1",
+      "architect",
+      expect.objectContaining({ summary: "held by lastlight-ignore" }),
+    );
+    expect(mockExecuteAgent).not.toHaveBeenCalled();
+  });
+
+  it("continues when the phase hold check cannot read the issue", async () => {
+    mockExecuteAgent.mockResolvedValue(makeSuccessResult());
+
+    const result = await runWorkflow(
+      SIMPLE_WORKFLOW,
+      BASE_CTX,
+      {} as never,
+      { beforePhase: async () => { throw new Error("GitHub unavailable"); } },
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockExecuteAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("rechecks a build hold before reviewer fix-loop subphases", async () => {
+    mockExecuteAgent.mockResolvedValue(makeSuccessResult("VERDICT: REQUEST_CHANGES"));
+    const checked: string[] = [];
+
+    const result = await runWorkflow(
+      WORKFLOW_WITH_REVIEWER_LOOP,
+      BASE_CTX,
+      {} as never,
+      {
+        beforePhase: async (phase) => {
+          checked.push(phase);
+          return phase === "reviewer_fix_1" ? "lastlight-ignore" : undefined;
+        },
+      },
+    );
+
+    expect(checked).toContain("reviewer_fix_1");
+    expect(mockExecuteAgent).toHaveBeenCalledTimes(2); // executor and first review only
+    expect(result.phases.at(-1)).toMatchObject({
+      phase: "reviewer_fix_1",
+      success: false,
+      output: "held by lastlight-ignore",
+    });
   });
 
   it("renders phase.messages.on_failure through the template engine", async () => {

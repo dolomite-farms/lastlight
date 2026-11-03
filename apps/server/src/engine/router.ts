@@ -329,10 +329,19 @@ export async function routeEvent(
       // search + its own model) instead of triage, which would otherwise file
       // a question as an enhancement and write an agent brief. Classified with
       // the same cheap model as comments; WORK is the safe default.
-      const isQuestion = await classifyIssueIntent(
+      const issueIntent = await classifyIssueIntent(
         envelope.title || "",
         envelope.body || "",
       );
+      if (issueIntent.state === "error") {
+        log.warn("Holding issue after classifier model error", {
+          repo: envelope.repo,
+          issueNumber: envelope.issueNumber,
+          reason: issueIntent.errorReason,
+        });
+        return { action: "ignore", reason: "classifier model error; item held for retry" };
+      }
+      const isQuestion = issueIntent.isQuestion;
       log.info("New issue classified", {
         repo: envelope.repo,
         issueNumber: envelope.issueNumber,
@@ -685,9 +694,18 @@ export async function routeEvent(
           } else if (isAuthor) {
             // Any other pre-build state: re-triage only when the reporter adds
             // substantive information (not "thanks"/acknowledgement).
-            retriage = await classifyCommentAddsInfo(envelope.body, {
+            const infoClassification = await classifyCommentAddsInfo(envelope.body, {
               issueTitle: envelope.title,
             });
+            if (infoClassification.state === "error") {
+              log.warn("Holding issue comment after classifier model error", {
+                repo: envelope.repo,
+                issueNumber: envelope.issueNumber,
+                reason: infoClassification.errorReason,
+              });
+              return { action: "ignore", reason: "classifier model error; item held for retry" };
+            }
+            retriage = infoClassification.addsInfo;
           }
 
           if (retriage) {
@@ -895,7 +913,7 @@ export async function routeEvent(
       // same comment text and have similar latency (single haiku call); doing
       // them in parallel keeps overall router latency at max(classifier, screener)
       // rather than their sum.
-      const [{ intent }, screen] = await Promise.all([
+      const [classification, screen] = await Promise.all([
         classifyComment(envelope.body, {
           issueTitle: envelope.title,
           isPullRequest: !!envelope.prNumber,
@@ -903,6 +921,27 @@ export async function routeEvent(
         }),
         screenForInjection(envelope.body),
       ]);
+      if (screen.state === "error" || classification.state === "error") {
+        const reason = screen.state === "error"
+          ? screen.reason
+          : classification.state === "error"
+          ? classification.errorReason
+          : "model request or response failed";
+        log.warn("Holding GitHub comment after model error", {
+          repo: envelope.repo,
+          issueNumber: envelope.issueNumber,
+          prNumber: envelope.prNumber,
+          reason,
+        });
+        if (envelope.prNumber) {
+          const warning = screen.state === "error"
+            ? `${flagPrefix(`screening unavailable; held: ${reason}`)}This comment was not processed because its safety screen failed.`
+            : `This comment was not processed because intent classification failed (${reason}).`;
+          return { action: "reply", message: warning };
+        }
+        return { action: "ignore", reason: `model error; item held for retry (${reason})` };
+      }
+      const { intent } = classification;
       log.info("Comment classified", {
         intent,
         screenerFlagged: screen.flagged,
@@ -1053,6 +1092,18 @@ export async function routeEvent(
         classifyComment(text),
         screenForInjection(text),
       ]);
+      if (screen.state === "error" || classification.state === "error") {
+        const reason = screen.state === "error"
+          ? screen.reason
+          : classification.state === "error"
+          ? classification.errorReason
+          : "model request or response failed";
+        log.warn("Holding Slack message after model error", {
+          sender: envelope.sender,
+          reason,
+        });
+        return { action: "ignore", reason: `model error; item held for retry (${reason})` };
+      }
       const {
         intent,
         repo: classifiedRepo,

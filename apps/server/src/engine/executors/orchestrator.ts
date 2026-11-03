@@ -221,11 +221,21 @@ export async function withSandbox<T>(
     otel: ctx.config.otel,
   });
   let provisioned: ProvisionResult | undefined;
+  let failed = false;
   try {
     provisioned = await sandbox.provision(ctx.prePopulate);
-    return await fn(sandbox, provisioned);
+    const result = await fn(sandbox, provisioned);
+    failed = (result as { success?: boolean } | undefined)?.success === false;
+    return result;
+  } catch (err) {
+    failed = true;
+    throw err;
   } finally {
-    if (provisioned) await sandbox.dispose();
+    // A failed phase's sandbox is kept (paused, 4 h) for inspection when the
+    // backend can; otherwise, or if keeping fails, it is disposed as before.
+    if (provisioned && !(failed && (await sandbox.keepForInspection?.().catch(() => false)))) {
+      await sandbox.dispose();
+    }
   }
 }
 

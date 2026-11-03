@@ -12,33 +12,33 @@
   default: true;
   prefersdark: true;
   color-scheme: dark;
-  --color-primary: #7dd3fc;
-  --color-primary-content: #0c1420;
-  --color-secondary: #c4b5fd;
-  --color-secondary-content: #1a1230;
-  --color-accent: #fcd34d;
-  --color-accent-content: #1a1200;
-  --color-neutral: #1f2530;
-  --color-neutral-content: #d6dde8;
-  --color-base-100: #0d1117;
-  --color-base-200: #161b22;
-  --color-base-300: #21262d;
-  --color-base-content: #e6edf3;
-  --color-info: #67e8f9;
-  --color-info-content: #061a20;
-  --color-success: #86efac;
-  --color-success-content: #062015;
-  --color-warning: #fcd34d;
-  --color-warning-content: #1a1200;
-  --color-error: #fca5a5;
-  --color-error-content: #1a0505;
+  --color-primary: oklch(57.1% 0.21 264); /* T3 primary blue */
+  --color-primary-content: #ffffff;
+  --color-secondary: #a3a3a3;
+  --color-secondary-content: #0a0a0a;
+  --color-accent: oklch(70.5% 0.213 47.604); /* T3 orange (agent mark) */
+  --color-accent-content: #0a0a0a;
+  --color-neutral: #191a1d;
+  --color-neutral-content: #f1f3f7;
+  --color-base-100: oklch(14.5% 0 0); /* T3 neutral-950 page */
+  --color-base-200: #141414; /* raised card (T3 card: page + 3% white) */
+  --color-base-300: #1f1f21; /* T3 accent surface: hover, active, dividers */
+  --color-base-content: oklch(97% 0 0); /* T3 neutral-100 text */
+  --color-info: oklch(70.7% 0.165 254.624); /* blue-400 */
+  --color-info-content: #0a0a0a;
+  --color-success: oklch(76.5% 0.177 163.223); /* emerald-400 */
+  --color-success-content: #0a0a0a;
+  --color-warning: oklch(82.8% 0.189 84.429); /* amber-400 */
+  --color-warning-content: #0a0a0a;
+  --color-error: oklch(70.4% 0.191 22.216); /* red-400 */
+  --color-error-content: #0a0a0a;
 
   /* daisyUI v5 design tokens — components (badge, table, btn, card…) read
      radius/border/size from the theme, so a colours-only theme renders them
      square and border-less. These are daisyUI's own defaults. */
   --radius-selector: 0.5rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.625rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
@@ -52,33 +52,33 @@
 @plugin "daisyui/theme" {
   name: "neaform";
   color-scheme: light;
-  --color-primary: #07a06f; /* nf dark green */
+  --color-primary: oklch(48.8% 0.217 264); /* T3 primary blue (light) */
   --color-primary-content: #ffffff;
-  --color-secondary: #000e38; /* nf deep navy */
-  --color-secondary-content: #e7ecf5;
-  --color-accent: #00e6a4; /* nf bright green */
-  --color-accent-content: #00321f;
-  --color-neutral: #000e38;
-  --color-neutral-content: #e7ecf5;
-  --color-base-100: #ffffff; /* card / main content surface */
-  --color-base-200: #eceff3; /* headers / sidebar / list */
-  --color-base-300: #cbd5e1; /* borders + dividers */
-  --color-base-content: #0f1a2e; /* near-black navy text */
-  --color-info: #0b3b63;
+  --color-secondary: oklch(27.4% 0.006 286.033); /* zinc-800 */
+  --color-secondary-content: #ffffff;
+  --color-accent: oklch(70.5% 0.213 47.604); /* T3 orange (agent mark) */
+  --color-accent-content: #ffffff;
+  --color-neutral: oklch(27.4% 0.006 286.033);
+  --color-neutral-content: oklch(98.5% 0 0);
+  --color-base-100: #ffffff; /* card */
+  --color-base-200: oklch(98.5% 0 0); /* zinc-50 sidebar */
+  --color-base-300: oklch(92% 0.004 286.32); /* zinc-200 border */
+  --color-base-content: oklch(27.4% 0.006 286.033); /* zinc-800 text */
+  --color-info: oklch(62.3% 0.214 259.815); /* blue-500 */
   --color-info-content: #ffffff;
-  --color-success: #07a06f;
+  --color-success: oklch(59.6% 0.145 163.225); /* emerald-600 */
   --color-success-content: #ffffff;
-  --color-warning: #b45309;
+  --color-warning: oklch(66.6% 0.179 58.318); /* amber-600 */
   --color-warning-content: #ffffff;
-  --color-error: #dc2626;
+  --color-error: oklch(57.7% 0.245 27.325); /* red-600 */
   --color-error-content: #ffffff;
 
   /* daisyUI v5 design tokens — components (badge, table, btn, card…) read
      radius/border/size from the theme, so a colours-only theme renders them
      square and border-less. These are daisyUI's own defaults. */
   --radius-selector: 0.5rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.625rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
@@ -125,8 +125,8 @@
 [data-theme="lastlight"] {
   /* Lighter than base-300 so a 1px rule reads as a drawn line rather than as a
      seam between two flat fills. */
-  --ll-hairline: #2a313c;
-  --ll-hairline-strong: #39424f;
+  --ll-hairline: rgb(255 255 255 / 0.08);
+  --ll-hairline-strong: rgb(255 255 255 / 0.14);
 
   --ll-shadow-raise: 0 1px 2px rgb(0 0 0 / 0.32);
   --ll-shadow-panel: 0 1px 2px rgb(0 0 0 / 0.28), 0 6px 16px -6px rgb(0 0 0 / 0.45);
@@ -145,13 +145,13 @@
      in opposite directions in the two themes — base-200 is lighter than the
      page in dark and darker than it in light — so neither one can mean "raised"
      in both. */
-  --ll-canvas-bg: #0a0e13;
-  --ll-node-bg: #171d26;
+  --ll-canvas-bg: #050505;
+  --ll-node-bg: #141414;
   /* A node card's edge. Separate from `--ll-hairline` (which rules tables and
      panel dividers) because a card floating on a canvas needs a stronger edge
      than a divider inside a dense list. */
-  --ll-node-border: #333c49;
-  --ll-canvas-dot: #232b36;
+  --ll-node-border: rgb(255 255 255 / 0.14);
+  --ll-canvas-dot: #1f1f1f;
   --ll-canvas-glow: rgb(255 255 255 / 0.03);
 
   /* ── Syntax colours ──────────────────────────────────────────────────
@@ -161,10 +161,10 @@
      strings became indistinguishable, and `accent` is a highlighter green on
      white. These are the only colours in the app whose job is to separate
      eight token classes from each other on one surface. */
-  --ll-code-surface: #10151c;
+  --ll-code-surface: #0f0f0f;
   --ll-code-comment: #7d8590;
   --ll-code-punctuation: #9aa4b1;
-  --ll-code-key: #7dd3fc;
+  --ll-code-key: #93b4ff;
   --ll-code-string: #a5d6a7;
   --ll-code-number: #fcd34d;
   --ll-code-keyword: #ff9d9d;
@@ -174,8 +174,8 @@
 }
 
 [data-theme="neaform"] {
-  --ll-hairline: #dde3ea;
-  --ll-hairline-strong: #c3cdd8;
+  --ll-hairline: oklch(92% 0.004 286.32);
+  --ll-hairline-strong: oklch(87.1% 0.006 286.286);
 
   --ll-shadow-raise: 0 1px 2px rgb(15 26 46 / 0.08);
   --ll-shadow-panel: 0 1px 2px rgb(15 26 46 / 0.10), 0 4px 10px -3px rgb(15 26 46 / 0.12);
@@ -188,16 +188,16 @@
   /* Light mode needs MORE separation, not less. A white card on a near-white
      canvas with a pale border is invisible, so the canvas is a real grey, the
      card edge is a real line, and the elevation below does actual work. */
-  --ll-canvas-bg: #e7ecf2;
+  --ll-canvas-bg: oklch(96.7% 0.001 286.375);
   --ll-node-bg: #ffffff;
-  --ll-node-border: #c3ccd8;
-  --ll-canvas-dot: #c9d2dd;
+  --ll-node-border: oklch(87.1% 0.006 286.286);
+  --ll-canvas-dot: oklch(87.1% 0.006 286.286);
   --ll-canvas-glow: rgb(255 255 255 / 0.45);
 
   /* The light half of the syntax palette — see the dark block above for why
      these are their own tokens. Tuned for a near-white code surface: one hue
      per token class, each dark enough to read at 12px. */
-  --ll-code-surface: #f6f8fa;
+  --ll-code-surface: oklch(98.5% 0 0);
   --ll-code-comment: #6a737d;
   --ll-code-punctuation: #57606a;
   --ll-code-key: #0550ae;
@@ -233,7 +233,7 @@
      `control` is buttons/inputs/badges, `panel` is cards and popovers, and
      `node` is a workflow canvas card — softer than a panel because it floats
      on a dotted field rather than sitting in a grid. */
-  --radius-control: 0.375rem;
+  --radius-control: 0.5rem;
   --radius-panel: 0.625rem;
   --radius-node: 0.5rem;
 }
@@ -323,7 +323,7 @@
 [data-theme="lastlight"] {
   --ll-type-agent: #c4b5fd; /* violet */
   --ll-type-review: #5eead4; /* teal */
-  --ll-type-cmd: #7dd3fc; /* blue — bash + script */
+  --ll-type-cmd: #93b4ff; /* blue — bash + script */
   --ll-type-context: #94a3b8; /* slate */
 }
 
@@ -506,7 +506,7 @@ body {
   background-color: var(--color-base-100);
 }
 [data-theme="neaform"] .ll-board-column {
-  background-color: #eceff3;
+  background-color: oklch(96.7% 0.001 286.375);
 }
 
 /* Scrollbars */

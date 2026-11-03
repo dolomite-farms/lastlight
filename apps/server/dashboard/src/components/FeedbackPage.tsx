@@ -41,19 +41,19 @@ import { STATUS } from "../lib/status-colors";
 // `#fca5a5` — ΔE 5.8 for deuteranopes, below the floor, on the two bars in
 // this view that most need telling apart.
 const CHART_DARK = {
-  score: "#7dd3fc",
-  grid: "#21262d",
-  axis: "rgba(230, 237, 243, 0.45)",
-  tooltipBg: "#161b22",
-  tooltipBorder: "#21262d",
+  score: "#6b9bff",
+  grid: "#1f1f21",
+  axis: "rgba(245, 245, 245, 0.45)",
+  tooltipBg: "#141414",
+  tooltipBorder: "#2a2a2d",
 };
 
 const CHART_LIGHT = {
-  score: "#0b3b63",
-  grid: "#e2e6ea",
-  axis: "rgba(27, 35, 48, 0.55)",
+  score: "#2563eb",
+  grid: "#e4e4e7",
+  axis: "rgba(39, 39, 42, 0.55)",
   tooltipBg: "#ffffff",
-  tooltipBorder: "#e2e6ea",
+  tooltipBorder: "#e4e4e7",
 };
 
 type Range = 7 | 30 | 90;

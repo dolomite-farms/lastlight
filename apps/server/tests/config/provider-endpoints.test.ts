@@ -128,6 +128,47 @@ describe("providers: config block", () => {
     expect(providerRegistry().byPrefix("acme")!.baseUrl).toBe("https://json.example/v1");
   });
 
+  it("a custom provider forwards declared image input; absent stays text-only", () => {
+    vi.stubEnv(
+      "LASTLIGHT_OVERLAY_DIR",
+      overlayWith(
+        "providers:\n  acme:\n    baseUrl: https://llm.corp.example/v1\n    input: [text, image]\n  plain:\n    baseUrl: https://plain.example/v1\n",
+      ),
+    );
+    loadConfig();
+    expect(providerEndpointOverrides()!.acme.input).toEqual(["text", "image"]);
+    expect("input" in providerEndpointOverrides()!.plain).toBe(false);
+  });
+
+  it.each(["video", "[]", "[text, video]", "[1]"])("rejects invalid providers.<name>.input %s", (bad) => {
+    vi.stubEnv(
+      "LASTLIGHT_OVERLAY_DIR",
+      overlayWith(`providers:\n  acme:\n    baseUrl: https://llm.corp.example/v1\n    input: ${bad}\n`),
+    );
+    expect(() => loadConfig()).toThrow(/providers\.acme\.input must be/);
+  });
+
+  it("a custom provider forwards declared reasoning; absent or false adds nothing", () => {
+    vi.stubEnv(
+      "LASTLIGHT_OVERLAY_DIR",
+      overlayWith(
+        "providers:\n  acme:\n    baseUrl: https://llm.corp.example/v1\n    reasoning: true\n  off:\n    baseUrl: https://off.example/v1\n    reasoning: false\n  plain:\n    baseUrl: https://plain.example/v1\n",
+      ),
+    );
+    loadConfig();
+    expect(providerEndpointOverrides()!.acme.reasoning).toBe(true);
+    expect("reasoning" in providerEndpointOverrides()!.off).toBe(false);
+    expect("reasoning" in providerEndpointOverrides()!.plain).toBe(false);
+  });
+
+  it.each(["yes", "1", "[true]", "high"])("rejects invalid providers.<name>.reasoning %s", (bad) => {
+    vi.stubEnv(
+      "LASTLIGHT_OVERLAY_DIR",
+      overlayWith(`providers:\n  acme:\n    baseUrl: https://llm.corp.example/v1\n    reasoning: ${bad}\n`),
+    );
+    expect(() => loadConfig()).toThrow(/providers\.acme\.reasoning must be/);
+  });
+
   it("fails the boot on a bad override rather than quietly using the vendor", () => {
     vi.stubEnv("LASTLIGHT_OVERLAY_DIR", overlayWith("providers:\n  anthropic:\n    baseUrl: http://gw.internal/v1\n"));
     expect(() => loadConfig()).toThrow(/non-loopback host/);

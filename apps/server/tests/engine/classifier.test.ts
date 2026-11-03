@@ -1,24 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { HELPER_MAX_TOKENS } from "#src/engine/llm.js";
 
-// classifier.ts now logs via the pino LoggerPort instead of console — mock the
-// logger module so the "falls back on error" assertions below can inspect the
-// captured error calls instead of console output.
-const { errorSpy } = vi.hoisted(() => ({ errorSpy: vi.fn() }));
-vi.mock("#src/logging/logger.js", () => {
-  const noopLogger = {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: errorSpy,
-    fatal: vi.fn(),
-    child: () => noopLogger,
-  };
-  return { logger: () => noopLogger };
-});
 import {
   buildClassifierPrompt,
   classifyComment,
+  classifyCommentAddsInfo,
   classifyIssueIntent,
   extractGithubRefFromText,
 } from "#src/engine/screen/classifier.js";
@@ -162,24 +148,56 @@ describe("classifyComment — injected chat", () => {
     expect(userMsg?.content).not.toContain("one-sentence justification");
   });
 
-  it("falls back to chat intent when chat rejects", async () => {
-    const chat = vi.fn().mockRejectedValue(new Error("network"));
-    errorSpy.mockClear();
+  it.each([
+    ["provider rate limit", Object.assign(new Error("rate limited"), { status: 429 })],
+    ["timeout", Object.assign(new Error("timed out"), { name: "TimeoutError" })],
+  ])("returns an error state on %s", async (_label, error) => {
+    const chat = vi.fn().mockRejectedValue(error);
     const r = await classifyComment("@last-light can you build this?", {}, { chat, defaultFastModel: () => "openai/test" });
-    expect(r).toEqual({ intent: "chat" });
-    expect(errorSpy).toHaveBeenCalled();
+    expect(r).toMatchObject({ state: "error", errorReason: expect.stringMatching(/429|timed out|failed/i) });
+    expect(r.errorReason).not.toContain("rate limited");
   });
 
-  it("with explain, surfaces the error in reason instead of a silent chat fallback", async () => {
+  it("returns an error state for unparseable output", async () => {
+    const chat = vi.fn().mockResolvedValue("not an intent response");
+    const r = await classifyComment("@last-light can you build this?", {}, { chat, defaultFastModel: () => "openai/test" });
+    expect(r).toMatchObject({ state: "error", errorReason: "classifier returned no valid INTENT" });
+  });
+
+  it("does not treat unparseable comment-info output as NOISE", async () => {
+    const chat = vi.fn().mockResolvedValue("maybe, but no answer");
+    await expect(classifyCommentAddsInfo("new steps", {}, { chat })).resolves.toMatchObject({
+      state: "error",
+      errorReason: "classifier returned no valid comment-info result",
+    });
+  });
+
+  it("returns a safe HTTP diagnostic when comment-info classification fails", async () => {
+    const chat = vi.fn().mockRejectedValue(Object.assign(new Error("provider body"), { status: 429 }));
+    await expect(classifyCommentAddsInfo("new steps", {}, { chat })).resolves.toEqual({
+      state: "error",
+      errorReason: "model request failed (HTTP 429)",
+    });
+  });
+
+  it.each(["ADDS_INFO", "NOISE"])("keeps the valid comment-info answer %s", async (answer) => {
+    const chat = vi.fn().mockResolvedValue(answer);
+    await expect(classifyCommentAddsInfo("new steps", {}, { chat })).resolves.toEqual({
+      state: "ok",
+      addsInfo: answer === "ADDS_INFO",
+    });
+  });
+
+  it("with explain, surfaces a safe error reason without provider details", async () => {
     const chat = vi.fn().mockRejectedValue(new Error("401 no api key"));
     const r = await classifyComment(
       "@last-light can you review this?",
       {},
       { chat, defaultFastModel: () => "openai/test", explain: true },
     );
-    expect(r.intent).toBe("chat");
-    expect(r.reason).toContain("classifier error");
-    expect(r.reason).toContain("401 no api key");
+    expect(r.state).toBe("error");
+    expect(r.reason).toMatch(/classifier error/i);
+    expect(r.reason).not.toContain("401 no api key");
   });
 });
 
@@ -239,7 +257,7 @@ describe("classifyIssueIntent — injected chat", () => {
       "Keen on a comparison.",
       { chat, defaultFastModel: () => "openai/test" },
     );
-    expect(r).toBe(true);
+    expect(r).toEqual({ state: "ok", isQuestion: true });
     expect(chat).toHaveBeenCalledWith(
       "openai/test",
       expect.arrayContaining([
@@ -256,14 +274,12 @@ describe("classifyIssueIntent — injected chat", () => {
       chat,
       defaultFastModel: () => "openai/test",
     });
-    expect(r).toBe(false);
+    expect(r).toEqual({ state: "ok", isQuestion: false });
   });
 
-  it("defaults to false (work → triage) when chat rejects", async () => {
+  it("returns an error state when chat rejects", async () => {
     const chat = vi.fn().mockRejectedValue(new Error("network"));
-    errorSpy.mockClear();
     const r = await classifyIssueIntent("Anything", "body", { chat, defaultFastModel: () => "openai/test" });
-    expect(r).toBe(false);
-    expect(errorSpy).toHaveBeenCalled();
+    expect(r).toMatchObject({ state: "error", errorReason: "model request failed" });
   });
 });

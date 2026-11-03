@@ -24,11 +24,14 @@ export {
  */
 export function cleanupOrphanedSandboxes(): void {
   try {
+    // Paused `-kept-` sandboxes (failed phases held for inspection) are left to
+    // their own 4 h sweep.
     const out = execFileSync("docker", [
-      "ps", "-q", "--filter", "name=lastlight-sandbox",
+      "ps", "--filter", "name=lastlight-sandbox",
+      "--format", "{{.ID}} {{.Names}}",
     ], { encoding: "utf-8", timeout: 5000 });
 
-    const ids = out.trim().split("\n").filter(Boolean);
+    const ids = out.trim().split("\n").filter((l) => l && !l.includes("-kept-")).map((l) => l.split(" ")[0]);
     if (ids.length > 0) {
       log.info("Cleaning up orphaned sandbox containers", { count: ids.length });
       execFileSync("docker", ["rm", "-f", ...ids], { stdio: "ignore", timeout: 15000 });

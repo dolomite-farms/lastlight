@@ -2066,6 +2066,24 @@ function normalizeProviderOverrides(raw: unknown): ProviderOverrides {
         throw new Error(`providers.${prefix}.${key} must be a positive integer`);
       }
     }
+    const input = value.input;
+    if (input !== undefined && input !== null) {
+      if (
+        !Array.isArray(input) ||
+        input.length === 0 ||
+        !input.every((k) => k === "text" || k === "image")
+      ) {
+        throw new Error(`providers.${prefix}.input must be a non-empty list of text and/or image`);
+      }
+      entry.input = [...new Set(input as string[])];
+    }
+    const reasoning = value.reasoning;
+    if (reasoning !== undefined && reasoning !== null) {
+      if (typeof reasoning !== "boolean") {
+        throw new Error(`providers.${prefix}.reasoning must be true or false`);
+      }
+      entry.reasoning = reasoning;
+    }
     out[prefix] = entry as ProviderOverride;
   }
   return out;

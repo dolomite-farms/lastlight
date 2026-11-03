@@ -1,21 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { HELPER_MAX_TOKENS } from "#src/engine/llm.js";
 
-// screen.ts now logs via the pino LoggerPort instead of console — mock the
-// logger module so the "fails open" assertion below can inspect the captured
-// error call instead of console output.
-const { errorSpy } = vi.hoisted(() => ({ errorSpy: vi.fn() }));
-vi.mock("#src/logging/logger.js", () => {
-  const noopLogger = {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: errorSpy,
-    fatal: vi.fn(),
-    child: () => noopLogger,
-  };
-  return { logger: () => noopLogger };
-});
 import {
   wrapUntrusted,
   flagPrefix,
@@ -91,7 +76,7 @@ describe("screenForInjection — injected chat", () => {
   it("parses positive injection responses", async () => {
     const chat = vi.fn().mockResolvedValue("INJECTION: YES\nREASON: override attempt");
     const r = await screenForInjection(longText, { chat, defaultFastModel: () => "openai/test" });
-    expect(r).toEqual({ flagged: true, reason: "override attempt" });
+    expect(r).toEqual({ state: "flagged", flagged: true, reason: "override attempt" });
     expect(chat).toHaveBeenCalledOnce();
     expect(chat).toHaveBeenCalledWith(
       "openai/test",
@@ -109,10 +94,26 @@ describe("screenForInjection — injected chat", () => {
     expect(r.flagged).toBe(false);
   });
 
-  it("fails open when chat rejects", async () => {
-    const chat = vi.fn().mockRejectedValue(new Error("network"));
+  it.each([
+    ["provider rate limit", Object.assign(new Error("rate limited"), { status: 429 })],
+    ["timeout", Object.assign(new Error("timed out"), { name: "TimeoutError" })],
+  ])("returns an error state on %s", async (label, error) => {
+    const chat = vi.fn().mockRejectedValue(error);
     const r = await screenForInjection(longText, { chat, defaultFastModel: () => "openai/test" });
-    expect(r.flagged).toBe(false);
-    expect(errorSpy).toHaveBeenCalled();
+    expect(r).toMatchObject({ state: "error", flagged: true });
+    expect(r.reason).toMatch(label === "provider rate limit" ? /429/ : /timed out/);
+    expect(r.reason).not.toContain("rate limited");
+  });
+
+  it("returns an error state for unparseable output", async () => {
+    const chat = vi.fn().mockResolvedValue("maybe clean, maybe injection");
+    const r = await screenForInjection(longText, { chat, defaultFastModel: () => "openai/test" });
+    expect(r).toMatchObject({ state: "error", flagged: true });
+  });
+
+  it("does not accept a valid marker surrounded by malformed output", async () => {
+    const chat = vi.fn().mockResolvedValue("INJECTION: NO\nthis is not a reason line");
+    const r = await screenForInjection(longText, { chat, defaultFastModel: () => "openai/test" });
+    expect(r).toMatchObject({ state: "error", flagged: true });
   });
 });

@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { parseProviderOverrides } from "../src/providers.js";
-import { registerProviderOverrides, resolveModel } from "../src/models.js";
+import { registerProviderOverrides, resolveModel, resolveThinkingLevel } from "../src/models.js";
 
 describe("parseProviderOverrides", () => {
   test("parses a minimal override and strips trailing slashes", () => {
@@ -21,6 +21,36 @@ describe("parseProviderOverrides", () => {
       apiKeyEnv: "ACME_API_KEY",
       contextWindow: 32000,
     });
+  });
+
+  test("carries a valid input list; absent or invalid values are ignored", () => {
+    const parsed = parseProviderOverrides(
+      JSON.stringify({
+        a: { baseUrl: "https://a/v1", input: ["text", "image", "image"] },
+        b: { baseUrl: "https://b/v1" },
+        c: { baseUrl: "https://c/v1", input: ["text", "video"] },
+        d: { baseUrl: "https://d/v1", input: "image" },
+        e: { baseUrl: "https://e/v1", input: [] },
+      }),
+      "--providers",
+    );
+    assert.deepEqual(parsed.a.input, ["text", "image"]);
+    for (const k of ["b", "c", "d", "e"]) assert.equal("input" in parsed[k], false);
+  });
+
+  test("carries reasoning only when exactly true; anything else is ignored", () => {
+    const parsed = parseProviderOverrides(
+      JSON.stringify({
+        a: { baseUrl: "https://a/v1", reasoning: true },
+        b: { baseUrl: "https://b/v1" },
+        c: { baseUrl: "https://c/v1", reasoning: false },
+        d: { baseUrl: "https://d/v1", reasoning: "true" },
+        e: { baseUrl: "https://e/v1", reasoning: 1 },
+      }),
+      "--providers",
+    );
+    assert.equal(parsed.a.reasoning, true);
+    for (const k of ["b", "c", "d", "e"]) assert.equal("reasoning" in parsed[k], false);
   });
 
   // Throwing rather than warning is the point: a silently-dropped override
@@ -99,6 +129,26 @@ describe("registerProviderOverrides", () => {
     assert.deepEqual(config.models[0].cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
 
+  test("a custom model is text-only by default and image-capable when declared", () => {
+    const plain = fakeRegistry();
+    registerProviderOverrides(plain, { acme: { baseUrl: "https://gw/v1" } }, "acme/m");
+    assert.deepEqual(plain.registered[0][1].models[0].input, ["text"]);
+
+    const vision = fakeRegistry();
+    registerProviderOverrides(vision, { acme: { baseUrl: "https://gw/v1", input: ["text", "image"] } }, "acme/m");
+    assert.deepEqual(vision.registered[0][1].models[0].input, ["text", "image"]);
+  });
+
+  test("a custom model has no reasoning by default and a thinking level when declared", () => {
+    const plain = fakeRegistry();
+    registerProviderOverrides(plain, { acme: { baseUrl: "https://gw/v1" } }, "acme/m");
+    assert.equal(plain.registered[0][1].models[0].reasoning, false);
+
+    const thinker = fakeRegistry();
+    registerProviderOverrides(thinker, { acme: { baseUrl: "https://gw/v1", reasoning: true } }, "acme/m");
+    assert.equal(thinker.registered[0][1].models[0].reasoning, true);
+  });
+
   test("a known provider running a model pi has no entry for is defined outright", () => {
     // A gateway exposing its own fine-tune under a familiar prefix: there is no
     // catalog entry to re-point, so the model is registered like a custom one —
@@ -143,5 +193,26 @@ describe("resolveModel with an override", () => {
     const model = resolveModel("anthropic/claude-haiku-4-5-20251001", registry);
     assert.equal(model.provider, "anthropic");
     assert.match(model.baseUrl, /anthropic\.com/);
+  });
+});
+
+describe("resolveThinkingLevel", () => {
+  const overrides = { acme: { baseUrl: "https://gw/v1", reasoning: true }, plain: { baseUrl: "https://p/v1" } };
+
+  test("a reasoning override model with no level runs off, not pi's medium", () => {
+    assert.equal(resolveThinkingLevel("acme/m", overrides, undefined), "off");
+  });
+
+  test("a reasoning override model keeps an explicit level", () => {
+    assert.equal(resolveThinkingLevel("acme/m", overrides, "high"), "high");
+  });
+
+  test("a built-in model with no level is left to pi's default", () => {
+    assert.equal(resolveThinkingLevel("anthropic/claude-haiku-4-5-20251001", {}, undefined), undefined);
+    assert.equal(
+      resolveThinkingLevel("anthropic/claude-haiku-4-5-20251001", { anthropic: { baseUrl: "https://gw/a", reasoning: true } }, undefined),
+      undefined,
+    );
+    assert.equal(resolveThinkingLevel("plain/m", overrides, undefined), undefined);
   });
 });

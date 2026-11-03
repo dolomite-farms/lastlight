@@ -18,10 +18,6 @@
 import { HELPER_MAX_TOKENS, chat as realChat, defaultFastModel as realDefaultFastModel, type ChatFunction } from "../llm.js";
 import { getAssetVersion, listAgentWorkflows, loadPromptTemplate } from "../../workflows/loader.js";
 import { intentToken, RESERVED_CONTROL_INTENTS } from "../../workflows/schema.js";
-import { logger } from "../../logging/logger.js";
-
-const log = logger("classifier");
-
 /**
  * A classifier intent. The well-known intents the router has bespoke handling
  * for are listed in {@link KNOWN_WORKFLOW_INTENT_ORDER} + {@link RESERVED_CONTROL_INTENTS},
@@ -31,17 +27,41 @@ const log = logger("classifier");
  */
 export type CommentIntent = string;
 
-export interface ClassificationResult {
-  intent: CommentIntent;
-  /** Repository mentioned in the message, if any (e.g. "cliftonc/lastlight"). */
+interface ClassificationFields {
   repo?: string;
   /** Issue or PR number mentioned, if any. */
   issueNumber?: number;
   /** Reason given for a reject intent. */
   reason?: string;
-  /** The resolved `provider/model` the classifier used (set in `explain` mode
-   *  only) — so introspection can show exactly what ran, incl. on a fallback. */
+  /** The resolved model used in explain mode. */
   model?: string;
+}
+
+export type ClassificationResult =
+  | (ClassificationFields & { state: "ok"; intent: CommentIntent })
+  | (ClassificationFields & { state: "error"; errorReason: string });
+
+export type IssueIntentResult =
+  | { state: "ok"; isQuestion: boolean }
+  | { state: "error"; errorReason: string };
+
+export type CommentInfoResult =
+  | { state: "ok"; addsInfo: boolean }
+  | { state: "error"; errorReason: string };
+
+function modelErrorReason(err: unknown): string {
+  if (err && typeof err === "object") {
+    const status = (err as { status?: unknown; statusCode?: unknown }).status
+      ?? (err as { statusCode?: unknown }).statusCode;
+    if (typeof status === "number") return `model request failed (HTTP ${status})`;
+    const name = (err as { name?: unknown }).name;
+    const message = (err as { message?: unknown }).message;
+    if ((typeof name === "string" && /timeout/i.test(name))
+      || (typeof message === "string" && /timeout|timed out/i.test(message))) {
+      return "model request timed out";
+    }
+  }
+  return "model request failed";
 }
 
 /** Optional surrounding context for a comment classification. */
@@ -243,19 +263,19 @@ function cleanRepoName(name: string): string {
 /**
  * Classify whether a newly-opened issue is a pure question (wants an answer)
  * versus a work item (wants a code change). Delegates to the main composed
- * classifier — `answer.yaml` owns the QUESTION category — and maps the result:
- * `question` intent → true (route to the answer workflow), anything else →
- * false (route to triage, the safe default). `classifyComment` swallows its own
- * errors and returns `chat`, so a transient failure lands on WORK/triage.
+ * classifier — `answer.yaml` owns the QUESTION category — and maps a valid
+ * result to the answer-versus-triage decision. Model failures remain errors.
  */
 export async function classifyIssueIntent(
   title: string,
   body: string,
   options: ClassifierOptions = {},
-): Promise<boolean> {
+): Promise<IssueIntentResult> {
   const combined = `${title}\n\n${body}`.trim();
-  const { intent } = await classifyComment(combined, { issueTitle: title }, options);
-  return intent === "question";
+  const result = await classifyComment(combined, { issueTitle: title }, options);
+  if (result.state === "error") return result;
+  const { intent } = result;
+  return { state: "ok", isQuestion: intent === "question" };
 }
 
 const ADDS_INFO_PROMPT_PATH = "prompts/classify-adds-info.md";
@@ -266,14 +286,14 @@ const ADDS_INFO_PROMPT_PATH = "prompts/classify-adds-info.md";
  * router to gate reporter-driven re-triage on issues that haven't entered a
  * build yet.
  *
- * Falls back to `false` (NOISE → no re-triage) on any error — leaving the
- * comment ignored, which matches the pre-existing behaviour for plain replies.
+ * Returns an error state on request or parse failures so callers can hold the
+ * item for retry.
  */
 export async function classifyCommentAddsInfo(
   commentBody: string,
   context: ClassifierContext = {},
   options: ClassifierOptions = {},
-): Promise<boolean> {
+): Promise<CommentInfoResult> {
   try {
     const chat = options.chat ?? realChat;
     const defaultFastModel = options.defaultFastModel ?? realDefaultFastModel;
@@ -288,16 +308,19 @@ export async function classifyCommentAddsInfo(
       ],
       { maxTokens: HELPER_MAX_TOKENS },
     );
-    return /\bADDS_INFO\b/i.test(output);
-  } catch (err: any) {
-    log.error("Error classifying comment info", { err });
-    return false;
+    const result = output.trim().match(/^(ADDS_INFO|NOISE)$/i);
+    return result
+      ? { state: "ok", addsInfo: result[1]!.toUpperCase() === "ADDS_INFO" }
+      : { state: "error", errorReason: "classifier returned no valid comment-info result" };
+  } catch (err: unknown) {
+    return { state: "error", errorReason: modelErrorReason(err) };
   }
 }
 
 /**
  * Classify a GitHub/Slack comment's intent and extract a repo reference.
- * Falls back to intent=chat on any error (safe default).
+ * Returns an explicit error state on request or parse failures. Callers must
+ * check `state` before using the intent.
  */
 export async function classifyComment(
   commentBody: string,
@@ -343,11 +366,18 @@ export async function classifyComment(
     const upper = output.trim().toUpperCase();
 
     // Match INTENT line, mapping the emitted token back to an intent via the
-    // dynamically-composed vocabulary. Unknown token → chat (safe default).
+    // dynamically-composed vocabulary.
     const intentMatch = upper.match(/INTENT:\s*(\w+)/);
-    const intent: CommentIntent = intentMatch
-      ? (tokenToIntent.get(intentMatch[1]) ?? "chat")
-      : "chat";
+    const mappedIntent = intentMatch ? tokenToIntent.get(intentMatch[1]) : undefined;
+    if (!mappedIntent) {
+      return {
+        state: "error",
+        reason: explain ? "classifier returned no valid INTENT" : undefined,
+        errorReason: "classifier returned no valid INTENT",
+        model: explain ? resolvedModel : undefined,
+      };
+    }
+    const intent: CommentIntent = mappedIntent;
 
     // Extract repo from "REPO: owner/name" line. If the classifier didn't
     // emit one (e.g. the user pasted a full github.com URL and the model
@@ -372,48 +402,18 @@ export async function classifyComment(
       ? reasonMatch[1].trim()
       : undefined;
 
-    // When no INTENT line parsed, the model returned empty or malformed output
-    // (e.g. a reasoning model whose token budget was consumed by hidden
-    // reasoning before it emitted anything) and the parser silently defaults to
-    // `chat`.
-    //
-    // That default is indistinguishable from a correctly-classified question:
-    // on a PR `chat` falls through to `pr-comment`, on an issue it routes to
-    // `ignore`. So a wholly dead classifier looks exactly like a quiet day, and
-    // one ran that way in production unnoticed. The `explain` copy below is
-    // introspection-only, but the WARNING is not — a fallback this consequential
-    // has to leave a trace on the route it actually ran.
-    if (!intentMatch) {
-      log.warn(
-        "No parseable INTENT — defaulting to chat. If this repeats, the model is " +
-          "returning nothing: raise HELPER_MAX_TOKENS or pin models.classifier to a model " +
-          "that answers within it",
-        { model: resolvedModel, raw: output.slice(0, 160) },
-      );
-    }
-    if (explain && !intentMatch) {
-      reason = `classifier returned no parseable INTENT — the model output was empty or malformed (raw: ${JSON.stringify(
-        output.slice(0, 160),
-      )}). A reasoning model with a small max-tokens budget can exhaust it on hidden reasoning before emitting output.`;
-    }
-
     return explain
-      ? { intent, repo, issueNumber, reason, model: resolvedModel }
-      : { intent, repo, issueNumber, reason };
-  } catch (err: any) {
-    log.error("Error classifying comment", { err });
-    // Fail-safe: an error must never launch a workflow, so default to chat.
-    // In introspection/`explain` mode, though, surface the error (and which
-    // model it tried) in `reason` — otherwise a failed LLM call (e.g. a missing
-    // provider key, or a fallback to a model with no key) is indistinguishable
-    // from a genuine chat classification, exactly the confusion the Event Router
-    // Playground needs to avoid.
+      ? { state: "ok", intent, repo, issueNumber, reason, model: resolvedModel }
+      : { state: "ok", intent, repo, issueNumber, reason };
+  } catch (err: unknown) {
+    const errorReason = modelErrorReason(err);
     return explain
       ? {
-          intent: "chat",
-          reason: `classifier error (fell back to chat): ${err.message}`,
+          state: "error",
+          reason: `classifier error: ${errorReason}`,
+          errorReason,
           model: resolvedModel || undefined,
         }
-      : { intent: "chat" };
+      : { state: "error", errorReason };
   }
 }

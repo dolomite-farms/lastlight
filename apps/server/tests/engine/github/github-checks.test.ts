@@ -513,3 +513,103 @@ describe("GitHubClient.getBaseChecksState", () => {
     expect(spy).toHaveBeenCalledWith("o", "r", "release/2.x", {});
   });
 });
+
+describe("GitHubClient.getChecksSummary — excludeStatusContexts", () => {
+  const releaseFailing: Combined = {
+    state: "failure",
+    statuses: [{ context: "release_ready", state: "failure", created_at: "2026-01-01T00:00:00Z" }],
+  };
+  const passingRuns = [run("completed", "success")];
+
+  it("a failing excluded status fails the ref without the option, passes with it", async () => {
+    const c = clientWith(fakeOctokit(passingRuns, releaseFailing));
+    expect((await c.getChecksSummary("o", "r", "main")).state).toBe("failing");
+    expect(
+      (await c.getChecksSummary("o", "r", "main", { excludeStatusContexts: ["release_ready"] })).state,
+    ).toBe("passing");
+  });
+
+  it("a failing non-excluded status still fails the ref", async () => {
+    const c = clientWith(
+      fakeOctokit(passingRuns, {
+        state: "failure",
+        statuses: [
+          { context: "release_ready", state: "failure" },
+          { context: "ci/other", state: "error" },
+        ],
+      }),
+    );
+    expect(
+      (await c.getChecksSummary("o", "r", "main", { excludeStatusContexts: ["release_ready"] })).state,
+    ).toBe("failing");
+  });
+
+  it("only excluded statuses and no check runs is none", async () => {
+    const c = clientWith(fakeOctokit([], releaseFailing));
+    expect(
+      await c.getChecksSummary("o", "r", "main", { excludeStatusContexts: ["release_ready"] }),
+    ).toEqual({ state: "none", settledCount: 0, pendingCount: 0 });
+  });
+
+  it("a pending non-excluded status keeps the ref pending, dated by its created_at", async () => {
+    const c = clientWith(
+      fakeOctokit(passingRuns, {
+        state: "failure",
+        statuses: [
+          { context: "release_ready", state: "failure" },
+          { context: "ci/slow", state: "pending", created_at: "2026-02-02T00:00:00Z" },
+        ],
+      }),
+    );
+    expect(
+      await c.getChecksSummary("o", "r", "main", { excludeStatusContexts: ["release_ready"] }),
+    ).toMatchObject({ state: "pending", pendingSince: "2026-02-02T00:00:00Z" });
+  });
+});
+
+describe("GitHubClient.getChecksSummary — excludeStatusContexts pagination", () => {
+  const capture = (combined: Record<string, unknown>) => {
+    const calls: Array<Record<string, unknown>> = [];
+    const octokit = {
+      rest: {
+        checks: { listForRef: async () => ({ data: { check_runs: [run("completed", "success")] } }) },
+        repos: {
+          getCombinedStatusForRef: async (params: Record<string, unknown>) => {
+            calls.push(params);
+            return { data: combined };
+          },
+        },
+      },
+    };
+    return { calls, c: clientWith(octokit) };
+  };
+  const exclude = { excludeStatusContexts: ["release_ready"] };
+
+  it("fails closed when the status page is truncated", async () => {
+    const statuses = Array.from({ length: 100 }, (_, i) => ({
+      context: i === 0 ? "release_ready" : `ci/${i}`,
+      state: "success",
+    }));
+    const { c } = capture({ state: "failure", total_count: 120, statuses });
+    expect((await c.getChecksSummary("o", "r", "main", exclude)).state).toBe("failing");
+  });
+
+  it("still filters when total_count matches the page", async () => {
+    const { c } = capture({
+      state: "failure",
+      total_count: 1,
+      statuses: [{ context: "release_ready", state: "failure" }],
+    });
+    expect((await c.getChecksSummary("o", "r", "main", exclude)).state).toBe("passing");
+  });
+
+  it("requests per_page 100 only when the option is set", async () => {
+    const { c, calls } = capture({ state: "success", total_count: 0, statuses: [] });
+    await c.getChecksSummary("o", "r", "main");
+    await c.getChecksSummary("o", "r", "main", { excludeStatusContexts: [] });
+    await c.getChecksSummary("o", "r", "main", exclude);
+    expect(calls[0]).toEqual({ owner: "o", repo: "r", ref: "main" });
+    expect(calls[1]).toEqual({ owner: "o", repo: "r", ref: "main" });
+    expect(calls[2]).toMatchObject({ per_page: 100 });
+  });
+});

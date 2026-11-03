@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("#src/engine/screen/classifier.js", () => ({
   classifyComment: vi.fn().mockResolvedValue({ intent: "chat" }),
   classifyIssueIntent: vi.fn().mockResolvedValue(false),
-  classifyCommentAddsInfo: vi.fn().mockResolvedValue(false),
+  classifyCommentAddsInfo: vi.fn().mockResolvedValue({ state: "ok", addsInfo: false }),
   WELL_KNOWN_INTENTS: new Set([
     "build", "explore", "question", "triage", "review", "security",
     "verify", "qa-test", "demo", "approve", "reject", "status", "reset", "chat",
@@ -15,7 +15,7 @@ vi.mock("#src/engine/screen/classifier.js", () => ({
 }));
 vi.mock("#src/engine/screen/screen.js", async () => {
   const actual = await vi.importActual<typeof import("#src/engine/screen/screen.js")>("#src/engine/screen/screen.js");
-  return { ...actual, screenForInjection: vi.fn().mockResolvedValue({ flagged: false }) };
+  return { ...actual, screenForInjection: vi.fn().mockResolvedValue({ state: "clean", flagged: false }) };
 });
 
 import { createAdminRoutes, type AdminConfig } from "#src/admin/routes.js";
@@ -108,6 +108,28 @@ describe("POST /route-test", () => {
     expect(resumeWorkflow).not.toHaveBeenCalled();
     expect(retryWorkflow).not.toHaveBeenCalled();
     expect(triggerCron).not.toHaveBeenCalled();
+  });
+
+  it("shows a classifier error as held instead of a chat fallback", async () => {
+    mockClassify.mockResolvedValue({ state: "error", errorReason: "model request failed (HTTP 429)" });
+    const app = createAdminRoutes(mockDb, mockSessions, mockSessions, makeConfig());
+    const res = await post(app, "/route-test", {
+      source: "github",
+      type: "comment.created",
+      repo: "cliftonc/drizby",
+      prNumber: 42,
+      isPullRequest: true,
+      body: "@last-light please review this",
+    });
+    const body = (await res.json()) as {
+      route: { action: string; handler?: string };
+      classification: { state: string };
+      explanation: { branchLabel: string };
+    };
+    expect(body.route.action).toBe("reply");
+    expect(body.route.handler).toBeUndefined();
+    expect(body.classification.state).toBe("error");
+    expect(body.explanation.branchLabel).toContain("classification held");
   });
 
   it("routes a deterministic event without calling the classifier", async () => {

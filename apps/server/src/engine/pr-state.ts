@@ -47,6 +47,14 @@ import {
 import { REQUIRES_HUMAN_LABEL } from "../cron/dependabot-discovery.js";
 import { logger } from "../logging/logger.js";
 
+/** Comma-separated `LASTLIGHT_BASE_IGNORE_STATUS_CONTEXTS`; unset means none. */
+function baseIgnoredStatusContexts(): string[] {
+  return (process.env.LASTLIGHT_BASE_IGNORE_STATUS_CONTEXTS ?? "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
 const log = logger("pr-state");
 
 /** Aggregate check state for a ref, as {@link GitHubClient.getChecksConclusion} reports it. */
@@ -703,6 +711,10 @@ export async function resolvePrState(
       // `resolveMergeDisposition` and `resolveReviewTrigger` alike — the review
       // would be waiting on itself (07 §7.2).
       const checkOpts = { excludeApp: appSlug(deps) };
+      // Base-branch only: non-CI status contexts (e.g. a `release_ready`
+      // release gate) must not make main read as upstream-broken. PR heads
+      // keep seeing every status.
+      const baseCheckOpts = { ...checkOpts, excludeStatusContexts: baseIgnoredStatusContexts() };
       const [summary, baseState, review, author] = await Promise.all([
         github
           .getChecksSummary(owner, repo, state.headSha, checkOpts)
@@ -711,7 +723,7 @@ export async function resolvePrState(
             return null;
           }),
         state.baseRef
-          ? github.getBaseChecksState(owner, repo, state.baseRef, checkOpts).catch((err: unknown) => {
+          ? github.getBaseChecksState(owner, repo, state.baseRef, baseCheckOpts).catch((err: unknown) => {
               note("getBaseChecksState", err);
               // "none" and not "failing": a base we could not read must never
               // be reported as upstream-broken, which would skip the fix.

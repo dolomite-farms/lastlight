@@ -128,8 +128,8 @@ export function registerProviderOverrides(
             name: modelId,
             api: override.api ?? "openai-completions",
             baseUrl: override.baseUrl,
-            reasoning: false,
-            input: ["text"],
+            reasoning: override.reasoning === true,
+            input: override.input ? [...override.input] : ["text"],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             contextWindow: override.contextWindow ?? DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW,
             maxTokens: override.maxTokens ?? DEFAULT_CUSTOM_MODEL_MAX_TOKENS,
@@ -146,4 +146,23 @@ export function registerProviderOverrides(
 
 function defaultApiKeyEnv(prefix: string): string {
   return `${prefix.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
+}
+
+/**
+ * The thinking level to hand pi. A model registered as reasoning-capable
+ * through a `providers:` override (`reasoning: true`, custom branch above)
+ * would otherwise inherit pi's default of "medium" and send `reasoning_effort`
+ * on every call, so with no explicit level it runs "off". Built-in models, and
+ * any explicit level, pass through unchanged.
+ */
+export function resolveThinkingLevel<T extends string>(
+  modelSpec: string,
+  overrides: ProviderEndpointOverrides,
+  requested: T | undefined,
+): T | "off" | undefined {
+  if (requested) return requested;
+  const { provider, modelId } = parseModelSpec(modelSpec);
+  if (overrides[provider]?.reasoning !== true) return undefined;
+  const builtin = (getBuiltinModel as unknown as (p: string, m: string) => Model<any> | undefined)(provider, modelId);
+  return builtin ? undefined : "off";
 }

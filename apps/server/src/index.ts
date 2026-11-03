@@ -69,6 +69,7 @@ import {
 } from "./engine/pr-state.js";
 import { renderContext, type ReviewTriggerOptions } from "./engine/pr-decisions.js";
 import { applyBuildDispatchGate } from "./engine/build-gate.js";
+import { issueHoldCheck } from "./workflows/hold.js";
 import {
   REVIEW_WORKFLOW,
   bindQueuedReviewCheck,
@@ -1032,6 +1033,16 @@ async function main() {
         if (combinedContext) {
           // Single screening call over the entire combined context.
           const screen = await screenForInjection(combinedContext);
+          if (screen.state === "error") {
+            const reason = screen.reason || "screener model request or response failed";
+            log.warn("Holding workflow after issue-context screening error", {
+              workflowName,
+              repo: `${owner}/${repo}`,
+              issueNumber: request.issueNumber,
+              reason,
+            });
+            return { success: false, error: `issue-context screening failed; item held for retry (${reason})` };
+          }
           const annotated = screen.flagged
             ? `${flagPrefix(screen.reason)}${combinedContext}`
             : combinedContext;
@@ -1213,6 +1224,8 @@ async function main() {
     const callbacks: RunnerCallbacks = {
       reporter: reporterProxy,
       publicUrl: config.publicUrl,
+      beforePhase: issueHoldCheck(github, workflowName, owner, repo,
+        typeof issueNumber === "number" ? issueNumber : undefined),
       postComment: slackPost
         ?? (github && issueNumber
           ? async (msg) => {

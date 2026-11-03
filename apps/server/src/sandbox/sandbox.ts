@@ -95,6 +95,12 @@ export interface Sandbox {
    * own, and undefined means "not measured", never zero.
    */
   usage?(): Promise<ResourceUsage | undefined>;
+  /**
+   * After a FAILED phase, keep the sandbox (paused) for a few hours instead of
+   * disposing it, so the failure can be inspected. Resolves true when kept —
+   * the caller then skips {@link dispose}. Optional; false/absent means dispose.
+   */
+  keepForInspection?(): Promise<boolean>;
 }
 
 /**
@@ -445,6 +451,10 @@ class DockerSandbox implements Sandbox {
 
   async dispose(): Promise<void> {
     if (this.sbx) await this.sbx.cleanup();
+  }
+
+  async keepForInspection(): Promise<boolean> {
+    return this.sbx ? this.sbx.sandbox.keepForInspection(this.opts.taskId) : false;
   }
 
   async usage(): Promise<ResourceUsage | undefined> {
@@ -837,6 +847,8 @@ export interface FakeBehavior {
   throwOnProvision?: Error | string;
   /** What `usage()` reports; omitted → undefined, as an in-process backend. */
   usage?: ResourceUsage;
+  /** `keepForInspection()` reports this (default false → disposed as usual). */
+  keepable?: boolean;
 }
 
 /**
@@ -933,6 +945,14 @@ export class FakeSandbox implements Sandbox {
   async usage(): Promise<ResourceUsage | undefined> {
     this.usageReadBeforeDispose = !this.disposed;
     return this.behavior.usage;
+  }
+
+  /** Set when the orchestrator kept this sandbox for inspection. */
+  kept = false;
+
+  async keepForInspection(): Promise<boolean> {
+    this.kept = this.behavior.keepable ?? false;
+    return this.kept;
   }
 
   dispose(): void {

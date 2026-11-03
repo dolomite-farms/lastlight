@@ -26,6 +26,10 @@ export interface ProviderEndpointOverride {
   contextWindow?: number;
   /** Unknown providers only: output-token ceiling to advertise. Default 16384. */
   maxTokens?: number;
+  /** Unknown providers only: input kinds the model accepts. Default `["text"]`. */
+  input?: Array<"text" | "image">;
+  /** Unknown providers only: model accepts a thinking level (sent as `reasoning_effort`). Default false. */
+  reasoning?: boolean;
 }
 
 /** Prefix → endpoint override, as `--providers` / `AGENTIC_PI_PROVIDERS` carry it. */
@@ -81,7 +85,14 @@ export function parseProviderOverrides(raw: string, label: string): ProviderEndp
       ...(typeof entry.apiKeyEnv === "string" ? { apiKeyEnv: entry.apiKeyEnv } : {}),
       ...(typeof entry.contextWindow === "number" ? { contextWindow: entry.contextWindow } : {}),
       ...(typeof entry.maxTokens === "number" ? { maxTokens: entry.maxTokens } : {}),
+      ...(isInputKinds(entry.input) ? { input: [...new Set(entry.input)] } : {}),
+      ...(entry.reasoning === true ? { reasoning: true } : {}),
     };
   }
   return out;
+}
+
+/** A non-empty list of known input kinds; anything else is ignored, like the other typed fields. */
+function isInputKinds(v: unknown): v is Array<"text" | "image"> {
+  return Array.isArray(v) && v.length > 0 && v.every((k) => k === "text" || k === "image");
 }

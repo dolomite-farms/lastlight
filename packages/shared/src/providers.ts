@@ -261,6 +261,13 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     host: "opencode.ai",
     fastModel: "deepseek-v4.1-flash",
     sampleModel: "kimi-k2.6",
+    // LOCAL PATCH (owlvin, 2026-10-17): the OpenCode Go subscription endpoint
+    // requires x-opencode-session on every request (a routing hint; a constant
+    // is accepted). pi-ai adds a real per-conversation id for sandbox runs; this
+    // covers the HARNESS's own in-process calls (screener, classifier), which go
+    // through llm.ts and otherwise fail with 400 MissingSessionID. Harmless on
+    // the zen/v1 endpoint, which ignores it.
+    extraHeaders: { "x-opencode-session": "e5adfffd-cf6d-490e-8611-c7dbfca1faec" },
   },
   // ── OpenRouter — aggregator (take any pi.dev-listed model via one key) ──
   {
@@ -358,6 +365,10 @@ export interface ProviderOverride {
   readonly contextWindow?: number;
   /** Custom providers only: output-token ceiling advertised to the agent. Default 16384. */
   readonly maxTokens?: number;
+  /** Custom providers only: input kinds the model accepts. Default `["text"]`; add `"image"` so agents can read images. */
+  readonly input?: readonly ("text" | "image")[];
+  /** Custom providers only: model accepts a reasoning (thinking) level, sent as `reasoning_effort` on openai-completions. Default false. */
+  readonly reasoning?: boolean;
 }
 
 export type ProviderOverrides = Readonly<Record<string, ProviderOverride>>;
@@ -380,6 +391,8 @@ export interface ProviderEndpoint {
   readonly envKeyOverridden: boolean;
   readonly contextWindow?: number;
   readonly maxTokens?: number;
+  readonly input?: readonly ("text" | "image")[];
+  readonly reasoning?: boolean;
 }
 
 /**
@@ -577,6 +590,8 @@ export function resolveProviderRegistry(
       envKeyOverridden: true,
       contextWindow: override.contextWindow,
       maxTokens: override.maxTokens,
+      input: override.input,
+      reasoning: override.reasoning,
     });
   }
 

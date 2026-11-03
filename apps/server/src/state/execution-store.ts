@@ -846,6 +846,20 @@ export class ExecutionStore {
     return "run";
   }
 
+  /**
+   * Make succeeded phase rows of one run re-runnable (`success = false`,
+   * `stop_reason = 'skipped'` — the same "may run again" state
+   * {@link recordSkippedPhase} writes). Cost and history stay on the rows.
+   */
+  async reopenPhases(workflowRunId: string, skills: string[]): Promise<number> {
+    const { executions } = this.t;
+    const result = await this.client
+      .update(executions)
+      .set({ success: false, stopReason: "skipped" })
+      .where(and(eq(executions.workflowRunId, workflowRunId), inArray(executions.skill, skills), eq(executions.success, true)));
+    return changes(result);
+  }
+
   /** Mark all stale "running" executions for a skill/trigger as failed.
    *  Called when we detect no matching Docker container is alive. */
   async markStaleAsFailed(

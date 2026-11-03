@@ -145,6 +145,20 @@ ARG UV_VERSION=0.12.5
 RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh \
  && uv --version
 
+# LOCAL PATCH (owlvin, 2026-10-17): bake managed CPython interpreters into a
+# shared path. The runtime pins UV_PYTHON_DOWNLOADS=never (so a phase bucket
+# can't fetch an interpreter off-allowlist at runtime), and each phase runs in
+# a fresh container whose $HOME — and therefore uv's default managed-python
+# dir, ~/.local/share/uv/python — does not survive between phases. A repo that
+# pins `requires-python` to a version the image lacks (RinTinTin pins
+# >=3.12,<3.13; the image ships 3.11) then fails its gate: the setup phase
+# installs 3.12 into its own container, and the gate phase's fresh container
+# finds no interpreter and a .venv symlinked to a missing python.
+# UV_PYTHON_INSTALL_DIR points at a baked, shared location every container
+# inherits, so `uv` finds these with downloads still set to `never`.
+ENV UV_PYTHON_INSTALL_DIR=/usr/local/share/uv/python
+RUN uv python install 3.12 && uv python install 3.13 && uv python list --only-installed
+
 # Create non-root agent user, UID/GID pinned to 10001 to MATCH the harness
 # `lastlight` user (see Dockerfile: `useradd -u 10001 lastlight`). The
 # entrypoint chowns the bind-mounted workspace to `agent`; per-PR workspaces

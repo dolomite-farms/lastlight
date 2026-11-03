@@ -741,7 +741,9 @@ function buildExplanation(
 
   let branchLabel: string;
   if (classification) {
-    branchLabel = `classified as '${classification.intent}'` + (handler ? ` → ${handler}` : "");
+    branchLabel = classification.state === "error"
+      ? `classification held: ${classification.errorReason}`
+      : `classified as '${classification.intent}'` + (handler ? ` → ${handler}` : "");
   } else if (route.action === "handler") {
     branchLabel = `${type} → ${handler}`;
   } else {

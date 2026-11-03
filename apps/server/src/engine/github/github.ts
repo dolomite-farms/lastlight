@@ -360,6 +360,13 @@ export interface ChecksQueryOptions {
    * state to a *human* (or to the merge prompt) should show what GitHub shows.
    */
   excludeApp?: string;
+  /**
+   * Commit-status contexts to ignore entirely: they are not CI (e.g. a
+   * deployment or release gate such as `release_ready`). When non-empty, the
+   * status leg is derived from the individual statuses that remain rather than
+   * from the combined aggregate `state`.
+   */
+  excludeStatusContexts?: readonly string[];
 }
 
 /** One `search` node as {@link GitHubClient.listOpenBoardItems} selects it. */
@@ -2311,7 +2318,15 @@ export class GitHubClient {
     // signal, so the status leg degrades to "no status contexts" instead.
     const [checksRes, statusRes] = await Promise.allSettled([
       kit.rest.checks.listForRef({ owner, repo, ref, filter: "latest" }),
-      kit.rest.repos.getCombinedStatusForRef({ owner, repo, ref }),
+      // The default page is 30 statuses; a filtered verdict needs the full list,
+      // so ask for the maximum page — but only when filtering, to leave the
+      // default request untouched.
+      kit.rest.repos.getCombinedStatusForRef({
+        owner,
+        repo,
+        ref,
+        ...((opts.excludeStatusContexts?.length ?? 0) > 0 ? { per_page: 100 } : {}),
+      }),
     ]);
     if (checksRes.status === "rejected") throw checksRes.reason;
     const checks = checksRes.value.data;
@@ -2320,8 +2335,25 @@ export class GitHubClient {
     // `state` below inert (both the pending and the failing test are gated on
     // there being contexts), so the ref is judged purely on its check runs and
     // the unreadable half can neither fail it nor pad `settledCount`.
-    const status: { state: string; statuses?: Array<unknown> } =
+    let status: { state: string; statuses?: Array<unknown>; total_count?: number } =
       statusRes.status === "fulfilled" ? statusRes.value.data : { state: "success", statuses: [] };
+    const excludedContexts = opts.excludeStatusContexts ?? [];
+    // A truncated page may hide a non-excluded failure, so fail closed: keep
+    // the unfiltered combined verdict.
+    const truncated = (status.total_count ?? 0) > (status.statuses?.length ?? 0);
+    if (excludedContexts.length > 0 && !truncated) {
+      // The aggregate `state` folds in the excluded contexts, so re-derive it
+      // from the entries that remain.
+      const kept = ((status.statuses ?? []) as Array<{ context?: string; state?: string }>).filter(
+        (st) => !excludedContexts.includes(st.context ?? ""),
+      );
+      const derived = kept.some((st) => st.state === "failure" || st.state === "error")
+        ? "failure"
+        : kept.some((st) => st.state === "pending")
+          ? "pending"
+          : "success";
+      status = { state: derived, statuses: kept };
+    }
     // Drop OUR OWN check runs when the caller is deciding whether to TRIGGER
     // work — see {@link ChecksQueryOptions.excludeApp} — then collapse each
     // check to the run that survives a re-run ({@link latestPerCheck}), so a

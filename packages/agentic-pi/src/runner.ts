@@ -39,7 +39,7 @@ import {
   isMisconfigurationSkip as isFileSearchMisconfig,
 } from "./extensions/file-search/index.js";
 import { loadSkillsExtension, buildSkillsStatusEvent } from "./extensions/skills/index.js";
-import { registerProviderOverrides, resolveModel } from "./models.js";
+import { registerProviderOverrides, resolveModel, resolveThinkingLevel } from "./models.js";
 import { resolveRetrySettings } from "./retry.js";
 import { cacheWarmingVeto } from "./cache-warming.js";
 import { applyGateTimeout } from "./gate-timeout.js";
@@ -315,7 +315,7 @@ export async function runOnce(
   const { session } = await createAgentSession({
     cwd: config.cwd,
     model,
-    thinkingLevel: config.thinking,
+    thinkingLevel: resolveThinkingLevel(config.model, providerOverrides, config.thinking),
     sessionManager,
     settingsManager,
     modelRuntime,

@@ -4,7 +4,7 @@ import type { TemplateContext } from "./templates.js";
 import { renderTemplate } from "./templates.js";
 import { evalSkipIf } from "./loop-eval.js";
 import { buildDag, getReadyNodes, getNodesToSkip, isComplete } from "./dag.js";
-import { PhaseExecutor, telemetryRepo, type PhaseRunContext } from "./phase-executor.js";
+import { PhaseExecutor, PhaseHeldError, telemetryRepo, type PhaseRunContext } from "./phase-executor.js";
 import { OPENINFERENCE_CHAIN, OPENINFERENCE_SPAN_KIND } from "./types.js";
 import type {
   EnginePorts,
@@ -32,6 +32,8 @@ export interface SchedulerDeps {
   resolver: PhaseResolver;
   ports: EnginePorts;
   store?: WorkflowStateStore;
+  /** Return a label when an external hold should stop the run before this phase. */
+  beforePhase?: (phase: string) => Promise<string | undefined>;
   /**
    * Whether a rich progress surface (ProgressReporter) is active — gates the
    * terminal completion ping + the PR-link step, which only fire on surfaces
@@ -67,7 +69,7 @@ export async function runWorkflowCore(
   outputs: Record<string, unknown> = {},
 ): Promise<WorkflowResult> {
   const { definition, ctx, config, triggerId, githubAccess, workflowId } = runScope;
-  const { reporter, resolver, ports, store: db, reporterActive, capabilities } = deps;
+  const { reporter, resolver, ports, store: db, beforePhase, reporterActive, capabilities } = deps;
   const log = deps.ports.logger ?? noopLogger;
 
   // The run-level span — the CHAIN root the phase (CHAIN) and agent (AGENT) spans
@@ -87,7 +89,7 @@ export async function runWorkflowCore(
   const notify = (text: string) => reporter.postNote(text);
   const reportStep = reporter.step.bind(reporter);
 
-  const executor = new PhaseExecutor(runScope, reporter, resolver, ports);
+  const executor = new PhaseExecutor(runScope, reporter, resolver, ports, beforePhase);
 
   // ── Schedule ─────────────────────────────────────────────────────────────────
 
@@ -215,6 +217,18 @@ export async function runWorkflowCore(
     try {
       outcome = await executor.execute(node, outputs);
     } catch (err) {
+      if (err instanceof PhaseHeldError) {
+        phases.push({ phase: err.phase, success: false, output: err.message });
+        if (db && workflowId) {
+          await db.runs.appendPhase(workflowId, err.phase, {
+            phase: err.phase,
+            timestamp: new Date().toISOString(),
+            success: false,
+            summary: err.message,
+          });
+        }
+        return { success: false, phases };
+      }
       // An agent call threw (OOM / unexpected / provisioning failure). Mark the
       // node failed so the failure cascades to downstream skips, mirroring a
       // normal failure.

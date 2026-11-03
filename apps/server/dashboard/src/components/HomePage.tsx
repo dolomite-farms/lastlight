@@ -73,29 +73,29 @@ function outcomeTooltipFormatter(value: unknown, name: unknown): [string, string
 }
 
 const CHART_DARK = {
-  primary: "#7dd3fc",
-  secondary: "#c4b5fd",
-  tertiary: "#f9a8d4",
-  cpu: "#5eead4",
-  accent: "#fcd34d",
-  info: "#67e8f9",
-  grid: "#21262d",
-  axis: "rgba(230, 237, 243, 0.45)",
-  tooltipBg: "#161b22",
-  tooltipBorder: "#21262d",
+  primary: "#6b9bff",
+  secondary: "#a78bfa",
+  tertiary: "#f472b6",
+  cpu: "#34d399",
+  accent: "#fb923c",
+  info: "#6b9bff",
+  grid: "#1f1f21",
+  axis: "rgba(245, 245, 245, 0.45)",
+  tooltipBg: "#141414",
+  tooltipBorder: "#2a2a2d",
 };
 
 const CHART_LIGHT = {
-  primary: "#0b3b63",
+  primary: "#2563eb",
   secondary: "#7c3aed",
-  tertiary: "#be185d",
-  cpu: "#0f766e",
-  accent: "#b45309",
-  info: "#0b3b63",
-  grid: "#e2e6ea",
-  axis: "rgba(27, 35, 48, 0.55)",
+  tertiary: "#db2777",
+  cpu: "#059669",
+  accent: "#ea580c",
+  info: "#2563eb",
+  grid: "#e4e4e7",
+  axis: "rgba(39, 39, 42, 0.55)",
   tooltipBg: "#ffffff",
-  tooltipBorder: "#e2e6ea",
+  tooltipBorder: "#e4e4e7",
 };
 
 function timeAgo(iso: string): string {

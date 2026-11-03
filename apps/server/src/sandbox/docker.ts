@@ -780,6 +780,31 @@ export class DockerSandbox {
     execSafe("docker", ["rm", "-f", info.containerName]);
     this.activeContainers.delete(taskId);
     log.info("Destroyed", { containerName: info.containerName });
+    sweepKeptSandboxes();
+  }
+
+  /**
+   * Keep a failed phase's sandbox for inspection: pause it and rename it
+   * `<name>-kept-<expiryEpochMs>`. Expiry is read back from the name by
+   * {@link sweepKeptSandboxes}, so it survives a harness restart. Resolves false
+   * (caller destroys as usual) when the container is not running — e.g. it was
+   * killed by a cancel — or anything else goes wrong.
+   */
+  async keepForInspection(taskId: string): Promise<boolean> {
+    const info = this.activeContainers.get(taskId);
+    if (!info) return false;
+    try {
+      await this.stopServices(taskId);
+      execCmd("docker", ["pause", info.containerName]);
+      execCmd("docker", ["rename", info.containerName, `${info.containerName}-kept-${Date.now() + KEEP_FAILED_MS}`]);
+    } catch (err) {
+      log.warn("Could not keep failed sandbox", { containerName: info.containerName, err });
+      return false;
+    }
+    this.activeContainers.delete(taskId);
+    log.info("Kept failed sandbox for inspection", { containerName: info.containerName, hours: KEEP_FAILED_MS / 3_600_000 });
+    sweepKeptSandboxes();
+    return true;
   }
 
   async destroyAll(): Promise<void> {
@@ -818,6 +843,30 @@ export class DockerSandbox {
     // Normal repo clone with a real .git directory needs no extra mount.
     return [];
   }
+}
+
+/** How long a failed phase's sandbox is kept, and how many are kept at once. */
+export const KEEP_FAILED_MS = 4 * 3_600_000;
+export const KEEP_FAILED_MAX = 3;
+const KEPT_NAME = /-kept-(\d+)$/;
+
+/** Which kept-sandbox names to remove: expired ones, then all but the newest `max`. */
+export function keptSandboxesToRemove(names: string[], now: number, max = KEEP_FAILED_MAX): string[] {
+  const kept = names
+    .map((name) => ({ name, expires: Number(KEPT_NAME.exec(name)?.[1]) }))
+    .filter((k) => Number.isFinite(k.expires))
+    .sort((a, b) => b.expires - a.expires);
+  return kept.filter((k, i) => k.expires <= now || i >= max).map((k) => k.name);
+}
+
+/** Auto-cleanup of kept sandboxes; best effort, runs on every keep and destroy. */
+export function sweepKeptSandboxes(now = Date.now()): void {
+  try {
+    const names = execCmd("docker", ["ps", "-a", "--filter", "name=-kept-", "--format", "{{.Names}}"])
+      .trim().split("\n").filter(Boolean);
+    const doomed = keptSandboxesToRemove(names, now);
+    if (doomed.length) execSafe("docker", ["rm", "-f", ...doomed]);
+  } catch { /* docker unavailable — nothing to sweep */ }
 }
 
 function execCmd(cmd: string, args: string[], opts?: { timeout?: number }): string {

@@ -828,3 +828,60 @@ describe("applyDerivedState — the run lock records the holder's head", () => {
     expect(state.runInFlight).toEqual({ workflow: "pr-fix", runId: "run-old", headSha: null });
   });
 });
+
+describe("resolvePrState — LASTLIGHT_BASE_IGNORE_STATUS_CONTEXTS", () => {
+  const emptyDb = {
+    runs: {
+      activeForTrigger: () => null,
+      latestSucceededForTriggers: () => ({}),
+      latestForTrigger: () => null,
+    },
+    executions: { costForTriggerWorkflows: () => 0, phaseSucceededInRun: () => false },
+  } as unknown as StateDb;
+
+  const stub = () =>
+    ({
+      getPullRequest: async () => ({
+        title: "t",
+        body: "",
+        draft: false,
+        labels: [],
+        head: { ref: "feature", sha: "newhead", repo: { full_name: "cliftonc/lastlight" } },
+        base: { ref: "main", repo: { full_name: "cliftonc/lastlight" } },
+      }),
+      getChecksSummary: vi.fn(async () => ({ state: "passing", settledCount: 1, pendingCount: 0 })),
+      getBaseChecksState: vi.fn(async () => "passing"),
+      getBotReviewHistory: async () => ({ atHead: null, latest: null }),
+      getCommitAuthorName: async () => "octocat",
+      getChangedPathsBetween: async () => null,
+      getPrDiffFingerprint: async () => null,
+    }) as any;
+
+  const run = (github: any) =>
+    resolvePrState("cliftonc", "lastlight", 190, { github, db: emptyDb, botLogin: BOT });
+
+  it("passes the env-derived exclusion to the base call only", async () => {
+    vi.stubEnv("LASTLIGHT_BASE_IGNORE_STATUS_CONTEXTS", " release_ready, ,other ");
+    try {
+      const github = stub();
+      await run(github);
+      expect(github.getBaseChecksState.mock.calls[0][3]).toMatchObject({
+        excludeStatusContexts: ["release_ready", "other"],
+      });
+      expect(github.getChecksSummary.mock.calls[0][3]).not.toHaveProperty("excludeStatusContexts");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("passes an empty exclusion when the env var is unset", async () => {
+    vi.stubEnv("LASTLIGHT_BASE_IGNORE_STATUS_CONTEXTS", "");
+    try {
+      const github = stub();
+      await run(github);
+      expect(github.getBaseChecksState.mock.calls[0][3].excludeStatusContexts).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});

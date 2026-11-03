@@ -71,6 +71,8 @@ const repoConfigLog = logger("repo-config");
 export type ApprovalGateConfig = Record<string, boolean>;
 
 export interface RunnerCallbacks {
+  /** Return a hold label to cancel before the named phase starts. */
+  beforePhase?: (phase: string) => Promise<string | undefined>;
   onPhaseStart?: (phase: string) => Promise<void>;
   onPhaseEnd?: (phase: string, result: PhaseResult) => Promise<void>;
   /**
@@ -455,7 +457,17 @@ async function runWorkflowBody(
   // without pre-merging — notably `resume.ts` when it grows the same wiring.
   const effectiveModels = repoConfig?.models ?? models;
   const effectiveVariants = repoConfig?.variants ?? variants;
-  const effectiveApproval = repoConfig?.approval ?? approvalConfig;
+  // LOCAL PATCH (owlvin, 2026-10-17): UNION rather than replace — identical to
+  // upstream PR nearform/lastlight#451 (filed from this deployment after an
+  // autonomous build sailed past post_architect despite
+  // `autonomy.stages.build.gates.post_architect: true`; the run's stored context
+  // carried `_autonomyGates: { post_architect: true }` and it never paused).
+  // `approvalConfig` from simple.ts is the EFFECTIVE map (base ⊕ repo ⊕ stage
+  // gates); `repoConfig.approval` is present-but-empty (`{}`) with no
+  // `.lastlight/` layer — not nullish — so the old `??` kept the `{}` and
+  // dropped the gates. The repo layer is add-only, so re-applying it underneath
+  // can only raise gates.
+  const effectiveApproval = { ...(repoConfig?.approval ?? {}), ...(approvalConfig ?? {}) };
 
   // Per-run asset stack. `assets` is undefined for every run without a repo
   // layer, in which case the module-level functions are used unchanged.
@@ -786,6 +798,16 @@ async function runWorkflowBody(
       resolver: phaseResolver,
       ports,
       store: db,
+      beforePhase: async (phase) => {
+        let holdLabel: string | undefined;
+        try {
+          holdLabel = await callbacks.beforePhase?.(phase);
+        } catch (err: unknown) {
+          logger("runner").warn("Could not check the issue hold label; continuing the run", { phase, err });
+        }
+        if (holdLabel && db && workflowId) await db.runs.cancelRun(workflowId);
+        return holdLabel;
+      },
       reporterActive: !!reporter,
       capabilities: { qaImageAvailable, qaImageName: SANDBOX_IMAGE_QA },
     }, outputs);

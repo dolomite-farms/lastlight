@@ -77,6 +77,8 @@ interface WireEndpoint {
   apiKeyEnv?: string;
   contextWindow?: number;
   maxTokens?: number;
+  input?: ("text" | "image")[];
+  reasoning?: boolean;
 }
 
 /**
@@ -95,6 +97,8 @@ export function providerEndpointOverrides(): Record<string, WireEndpoint> | unde
       ...(e.envKeyOverridden ? { apiKeyEnv: e.envKey } : {}),
       ...(e.contextWindow ? { contextWindow: e.contextWindow } : {}),
       ...(e.maxTokens ? { maxTokens: e.maxTokens } : {}),
+      ...(e.input ? { input: [...e.input] } : {}),
+      ...(e.reasoning ? { reasoning: true } : {}),
     };
   }
   return out;
