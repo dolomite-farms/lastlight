@@ -66,7 +66,7 @@ export function resetProviderRegistry(): void {
 export { PROVIDER_OVERRIDES_ENV };
 
 /** One endpoint override in agentic-pi's wire shape. */
-interface WireEndpoint {
+export interface WireEndpoint {
   baseUrl: string;
   api: string;
   /**
@@ -79,6 +79,7 @@ interface WireEndpoint {
   maxTokens?: number;
   input?: ("text" | "image")[];
   reasoning?: boolean;
+  headers?: Record<string, string>;
 }
 
 /**
@@ -99,6 +100,7 @@ export function providerEndpointOverrides(): Record<string, WireEndpoint> | unde
       ...(e.maxTokens ? { maxTokens: e.maxTokens } : {}),
       ...(e.input ? { input: [...e.input] } : {}),
       ...(e.reasoning ? { reasoning: true } : {}),
+      ...(e.headers ? { headers: { ...e.headers } } : {}),
     };
   }
   return out;
