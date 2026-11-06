@@ -64,7 +64,6 @@ import {
   isPrFixShaped,
 } from "./target-policy.js";
 import { logger } from "../logging/logger.js";
-import { isRunLive } from "./live-runs.js";
 
 const repoConfigLog = logger("repo-config");
 const simpleLog = logger("simple");
@@ -1300,7 +1299,7 @@ async function runSimpleWorkflowBody(
       workflowName,
       engine: existingRun.engine,
     });
-    return { success: true, phases: [] };
+    return { success: true, paused: true, phases: [] };
   }
   if (existingRun && existingRun.workflowName === workflowName) {
     const claimed = await claimExistingRun(existingRun, db);
@@ -1728,14 +1727,6 @@ async function handleExistingRun(
   notify: (msg: string) => Promise<number | void>,
   db: StateDb,
 ): Promise<WorkflowResult | null> {
-  if (run.status === "running" && isRunLive(run.id)) {
-    simpleLog.info("Duplicate trigger for running run — leaving the active runner alone", {
-      runId: run.id,
-      workflowName: run.workflowName,
-    });
-    return { success: true, phases: [] };
-  }
-
   // Dedup: a duplicate trigger on an already-queued run must be a no-op.
   // Do NOT fall through to runWorkflow — that would execute it outside the cap.
   if (run.status === "queued") {

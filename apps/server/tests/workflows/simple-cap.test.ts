@@ -50,7 +50,6 @@ import { runSimpleWorkflow } from "#src/workflows/simple.js";
 import type { StateDb } from "#src/state/db.js";
 import { makeTestDb } from "../helpers/state-db.js";
 import { runWorkflow } from "#src/workflows/runner.js";
-import { markRunLive } from "#src/workflows/live-runs.js";
 
 const mockRunWorkflow = vi.mocked(runWorkflow);
 
@@ -252,76 +251,6 @@ describe("runSimpleWorkflow — concurrency cap (issue #172)", () => {
     expect(mockRunWorkflow).not.toHaveBeenCalled();
     // Status stays queued, not changed
     expect((await db.runs.getRun("queued-run-id"))!.status).toBe("queued");
-  });
-
-  it("does not start another runner for a duplicate trigger on a running row", async () => {
-    await db.runs.createRun({
-      id: "running-run-id",
-      workflowName: "explore",
-      triggerId: "acme/widgets#56",
-      currentPhase: "socratic",
-      status: "running",
-      startedAt: new Date().toISOString(),
-    });
-
-    const release = markRunLive("running-run-id");
-    let result;
-    try {
-      result = await runSimpleWorkflow(
-        "explore",
-        makeRequest({ issueNumber: 56 }),
-        makeConfig(),
-        makeCallbacks(),
-        db,
-        undefined,
-        undefined,
-        "lastlight:bootstrap",
-        undefined,
-        { maxWorkflows: 4, maxQueueWaitMs: 1_800_000 },
-      );
-    } finally {
-      release();
-    }
-
-    expect(result.phases).toEqual([]);
-    expect(result.paused).toBeUndefined();
-    expect(mockRunWorkflow).not.toHaveBeenCalled();
-    expect((await db.runs.getRun("running-run-id"))!.status).toBe("running");
-  });
-
-  it("resumes an approved gate after resolveGateAndResume changed its row to running", async () => {
-    await db.runs.createRun({
-      id: "approved-run",
-      workflowName: "explore",
-      triggerId: "acme/widgets#57",
-      currentPhase: "waiting_approval",
-      status: "paused",
-      startedAt: new Date().toISOString(),
-    });
-    await db.approvals.create({
-      id: "approval-57",
-      workflowRunId: "approved-run",
-      gate: "post_architect",
-      summary: "Approve",
-      createdAt: new Date().toISOString(),
-    });
-
-    await db.runs.resolveGateAndResume("approval-57", "operator");
-    await runSimpleWorkflow(
-      "explore",
-      makeRequest({ issueNumber: 57 }),
-      makeConfig(),
-      makeCallbacks(),
-      db,
-      undefined,
-      undefined,
-      "lastlight:bootstrap",
-      undefined,
-      { maxWorkflows: 4, maxQueueWaitMs: 1_800_000 },
-    );
-
-    expect(mockRunWorkflow).toHaveBeenCalledOnce();
-    expect((await db.runs.getRun("approved-run"))!.status).toBe("succeeded");
   });
 
   it("k8s backend admits freely at dispatch (fuse, not maxWorkflows)", async () => {
