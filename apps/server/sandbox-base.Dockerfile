@@ -185,3 +185,13 @@ RUN mkdir -p /etc/postgresql-common \
  && for b in initdb pg_ctl postgres pg_controldata; do ln -s /usr/lib/postgresql/*/bin/$b /usr/local/bin/$b; done \
  && initdb --version && pg_ctl --version && pg_config --bindir \
  && rm -rf /var/lib/apt/lists/*
+
+# LOCAL PATCH (owlvin, 2026-11-06): put the baked CPython interpreters on PATH.
+# UV_PYTHON_INSTALL_DIR (above) is an env var, and some test harnesses launch
+# uv with a scrubbed env (siteprint's rehearsal rig passes only PATH/HOME/LANG).
+# There uv searches $HOME/.local/share/uv/python and PATH only, finds no
+# 3.12, and offline `uv lock --check` fails with "No interpreter found".
+# GitHub runners have python3.12 on PATH; symlinks give the sandbox the same.
+RUN ln -s "$(ls -d /usr/local/share/uv/python/cpython-3.12*/bin/python3.12 | head -1)" /usr/local/bin/python3.12 \
+ && ln -s "$(ls -d /usr/local/share/uv/python/cpython-3.13*/bin/python3.13 | head -1)" /usr/local/bin/python3.13 \
+ && python3.12 --version && python3.13 --version
