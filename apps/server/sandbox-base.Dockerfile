@@ -170,3 +170,18 @@ RUN uv python install 3.12 && uv python install 3.13 && uv python list --only-in
 # and the harness (host). Also self-heals dirs left at 1001 by older images:
 # the entrypoint's `chown -R agent:agent` re-owns them to 10001 on next reuse.
 RUN groupadd -g 10001 agent && useradd -m -s /bin/bash -u 10001 -g 10001 agent
+
+# LOCAL PATCH (owlvin, 2026-11-06): local PostgreSQL server binaries. GitHub's
+# ubuntu runners ship PostgreSQL, and siteprint's contract tests start a
+# throwaway local server (payments.py `_postgres_binaries()` looks for
+# initdb/pg_ctl on PATH, else `pg_config --bindir`). Without them the
+# guardrails full test suite ERRORs with "Local Postgres binaries are
+# unavailable". Debian keeps the server binaries in /usr/lib/postgresql/<ver>/bin,
+# off PATH, so symlink them into /usr/local/bin; libpq-dev supplies pg_config.
+# No cluster is created at install (tests initdb their own temp dir).
+RUN mkdir -p /etc/postgresql-common \
+ && printf 'create_main_cluster = false\n' > /etc/postgresql-common/createcluster.conf \
+ && apt-get update && apt-get install -y --no-install-recommends postgresql libpq-dev \
+ && for b in initdb pg_ctl postgres pg_controldata; do ln -s /usr/lib/postgresql/*/bin/$b /usr/local/bin/$b; done \
+ && initdb --version && pg_ctl --version && pg_config --bindir \
+ && rm -rf /var/lib/apt/lists/*
